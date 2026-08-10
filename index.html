@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mewo2/terrain 程序化大陆</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="wrap">
+<h1>程序化大陆</h1>
+<p class="sub">来源：<b>mewo2/terrain</b>（MIT · 2016 · 1073 行单文件）</p>
+<div class="controls">
+  <label>细胞数
+    <select id="npts">
+      <option value="4096">4k（快）</option>
+      <option value="8192">8k（中）</option>
+      <option value="16384" selected>16k（默认）</option>
+      <option value="32768">32k（高细节）</option>
+      <option value="65536">64k（最高·重）</option>
+    </select>
+  </label>
+  <label>领地数 <input id="nterrs" type="number" value="5" min="1" max="15" style="width:50px" title="领地（区域）数量，自动不超过城市数"></label>
+  <label>城市数 <input id="ncities" type="number" value="15" min="4" max="40" style="width:60px"></label>
+  <label>种子 <input id="seed" type="text" placeholder="留空 = 随机" style="width:130px"><button type="button" onclick="randomSeed()" title="随机种子" class="seed-rnd">↻</button></label>
+  <button id="genbtn" onclick="gen()">生成地图</button>
+  <label>词库 <select id="lexsel" onchange="setLex(this.value)"></select></label>
+</div>
+<div id="status">点击「生成地图」开始</div>
+<div class="mapbox">
+  <div class="map-wrap">
+    <div class="map-tools">
+      <span class="tool-group">
+        <button onclick="zoomBy(1.25)" title="缩小">−</button>
+        <button onclick="zoomBy(0.8)" title="放大">+</button>
+        <button onclick="resetView()" title="复位全貌">全貌</button>
+        <button onclick="toggleFullscreen()" title="网页内全屏 / 还原" data-fs>全屏</button>
+        <span class="sep"></span>
+        <button class="layer-btn" data-layer="road" onclick="toggleLayer('road')" title="隐藏 / 显示道路（实线与海上虚线）">道路</button>
+        <button class="layer-btn" data-layer="city" onclick="toggleLayer('city')" title="隐藏 / 显示城市（标记与名称）">城市</button>
+        <button class="layer-btn" data-layer="terr" onclick="toggleLayer('terr')" title="隐藏 / 显示领地（边界与名称）">领地</button>
+      </span>
+      <button class="fold-btn" onclick="toggleTools()" title="折叠工具按钮">»</button>
+    </div>
+    <svg id="map" viewBox="-500 -500 1000 1000" width="960" height="960"></svg>
+  </div>
+</div>
+</div>
+<aside id="sidePanel">
+  <div class="sp-head">
+    <span class="sp-title">地图工具</span>
+    <button class="sp-fold" onclick="toggleSide()" title="收起 / 展开侧栏">«</button>
+  </div>
+  <div class="sp-body">
+    <button class="sp-export" onclick="exportPNG()" title="导出完整地图为 PNG（包含临时命名，不受缩放影响）">⬇ 导出图片</button>
+    <button class="sp-export small" onclick="exportData()" title="导出当前地图数据（种子 / 细胞数 / 城市数 / 领地数 + 领地城市名称），可导入恢复">⤓ 导出数据</button>
+    <button class="sp-export small" onclick="document.getElementById('importFile').click()" title="导入地图数据文件：自动用文件中的参数重新生成地图并恢复当时的名称">⤒ 导入数据</button>
+    <input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="onImportFile(event)">
+    <div class="sp-sec">名称管理 · 领地-城市</div>
+    <div id="spTree"></div>
+  </div>
+</aside>
+<script src="js/d3-mini.js"></script>
+<script src="js/d3-voronoi.js"></script>
+<script src="js/namer.js"></script>
+<script src="js/terrain-core.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>

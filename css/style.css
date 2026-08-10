@@ -1,0 +1,79 @@
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { overflow-x: hidden; }
+  body { font-family: 'Georgia', 'Songti SC', serif; background: #3d2f24; color: #e8dcc0; padding: 24px; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { text-align: center; font-size: 22px; color: #f0e0c0; margin-bottom: 6px; letter-spacing: 2px; }
+  .sub { text-align: center; font-size: 12px; color: #b8a488; margin-bottom: 16px; line-height: 1.7; }
+  .sub b { color: #d8c090; }
+  .controls { display: flex; flex-wrap: nowrap; gap: 10px; justify-content: center; align-items: center; margin-bottom: 14px; background: #4a3a2c; border-radius: 10px; padding: 10px 14px; }
+  .controls label { font-size: 13px; color: #d8c8a8; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .controls select, .controls input { background: #5a4836; color: #f0e4c8; border: 1px solid #8a6f52; border-radius: 6px; padding: 5px 8px; font-size: 13px; font-family: inherit; flex-shrink: 0; white-space: nowrap; }
+  .controls button { background: #8a5a2a; color: #fff6e6; border: none; border-radius: 8px; padding: 7px 18px; font-size: 14px; cursor: pointer; font-family: inherit; letter-spacing: 1px; flex-shrink: 0; white-space: nowrap; }
+  .controls button:hover { background: #a06a30; }
+  #status { font-size: 12px; color: #c8b898; text-align: center; margin-bottom: 10px; min-height: 16px; }
+  .mapbox { background: #f5ecd7; border-radius: 12px; padding: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.45); position: relative; overflow: auto; width: fit-content; margin: 0 auto; }
+  .map-wrap { position: relative; width: fit-content; margin: 0 auto; }
+  .mapbox.fullscreen { position: fixed; inset: 0; width: 100%; z-index: 9999; border-radius: 0; padding: 12px; background: #241b12; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .mapbox.fullscreen svg#map { max-width: 96vw; max-height: 94vh; }
+  .map-tools { position: absolute; top: 8px; right: 8px; z-index: 10; display: flex; max-width: 470px; overflow: hidden; transition: max-width .35s ease; }
+  .map-tools.collapsed { max-width: 32px; }
+  .map-tools .tool-group { display: flex; gap: 5px; align-items: center; padding-right: 32px; opacity: 1; transition: opacity .25s ease; }
+  .map-tools.collapsed .tool-group { opacity: 0; pointer-events: none; }
+  .map-tools button { background:#5a4836; color:#f0e4c8; border:1px solid #8a6f52; border-radius:6px; cursor:pointer; padding:4px 10px; font-size:13px; font-family:inherit; flex-shrink: 0; white-space: nowrap; }
+  .map-tools button:hover { background:#6a5540; }
+  /* 折叠按钮绝对定位于右侧，不参与 flex 收缩，折叠时永远可见 */
+  .map-tools .fold-btn { position: absolute; right: 5px; top: 50%; transform: translateY(-50%); z-index: 2; flex-shrink: 0; min-width: 24px; padding: 4px 6px; text-align: center; }
+  /* 图层显隐开关：隐藏时按钮高亮（橙色）表示该层当前被隐藏 */
+  .map-tools .sep { width: 1px; height: 20px; align-self: center; background: #8a6f52; margin: 0 2px; flex-shrink: 0; }
+  .map-tools button.layer-btn.active { background: #c0762e; color: #fff6e6; border-color: #e8b070; }
+  .map-tools button.layer-btn.active:hover { background: #d0863e; }
+  /* 被隐藏的图层：标记与文字一律不显示 */
+  svg#map .layer-hidden { display: none; }
+  svg#map { cursor: grab; touch-action: none; display: block; width: 100%; height: auto; background: #f5ecd7; border-radius: 8px; }
+  svg#map.dragging { cursor: grabbing; }
+  /* 羊皮纸风样式（mewo2/terrain 原版风格） */
+  path.river { fill: none; stroke: #7fa8c9; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  path.coast { fill: none; stroke: #8a6a4a; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+  path.border { fill: none; stroke: #a08060; stroke-width: 1.6; stroke-dasharray: 12 4 2 4; opacity: .75; }
+  path.road { fill: none; stroke: #4a2f16; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
+  path.roadsea { fill: none; stroke: #4a2f16; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 5 4; opacity: .6; }
+  line.slope { stroke: #9a7b52; opacity: .5; }
+  circle.city { fill: #fdf6e3; stroke: #4a3018; stroke-width: 3; }
+  text.city { font-family: Georgia, serif; fill: #3a2a18; font-size: 20px; font-weight: bold; paint-order: stroke; stroke: #f5ecd7; stroke-width: 3px; stroke-linejoin: round; }
+  text.region { font-family: Georgia, serif; fill: #6a4a28; font-size: 36px; font-style: italic; letter-spacing: 3px; paint-order: stroke; stroke: #f5ecd7; stroke-width: 4px; stroke-linejoin: round; opacity: .85; }
+  text.city.dnd, text.region.dnd { font-family: "KaiTi","STKaiti","SimSun",serif; }
+  button.seed-rnd { height: 30px; line-height: 28px; padding: 0 9px; background:#5a4836; color:#f0e4c8; border:1px solid #8a6f52; border-radius:6px; cursor:pointer; font-size:13px; }
+  button.seed-rnd:hover { background:#6a5540; }
+  /* 侧边栏（地图工具：导出 + 名称管理三级关联） */
+  #sidePanel { position: fixed; top: 16px; right: 16px; width: 320px; max-height: 92vh; display: flex; flex-direction: column; background: #4a3a2c; border: 1px solid #8a6f52; border-radius: 10px; color: #e8dcc0; font-family: 'Georgia','Songti SC',serif; z-index: 100; box-shadow: 0 6px 24px rgba(0,0,0,.5); overflow: hidden; }
+  #sidePanel.closed { width: 34px; }
+  #sidePanel.closed .sp-body, #sidePanel.closed .sp-title { display: none; }
+  #sidePanel .sp-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-bottom: 1px solid #6a5540; }
+  #sidePanel .sp-title { font-size: 14px; font-weight: bold; color: #f0e0c0; letter-spacing: 1px; }
+  #sidePanel .sp-fold { background: none; border: none; color: #c8b898; font-size: 14px; cursor: pointer; padding: 0 4px; }
+  #sidePanel .sp-fold:hover { color: #f0e0c0; }
+  #sidePanel .sp-body { padding: 10px 12px; overflow-y: auto; }
+  #sidePanel .sp-export { width: 100%; margin-bottom: 4px; padding: 7px; background: #8a5a2a; color: #fff6e6; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; font-family: inherit; }
+  #sidePanel .sp-export:hover { background: #a06a30; }
+  #sidePanel .sp-export.small { padding: 5px; font-size: 12px; background: #5a4836; color: #f0e4c8; border: 1px solid #8a6f52; }
+  #sidePanel .sp-export.small:hover { background: #6a5540; }
+  #sidePanel .sp-sec { font-size: 12px; color: #e8c890; margin: 10px 0 6px; letter-spacing: 1px; border-bottom: 1px solid #6a5540; padding-bottom: 3px; }
+  #sidePanel .sp-empty { font-size: 12px; color: #b8a488; padding: 6px 0; }
+  /* 三级树 */
+  #sidePanel .sp-node { display: flex; align-items: center; gap: 5px; font-size: 12px; padding: 3px 4px; border-radius: 5px; cursor: pointer; }
+  #sidePanel .sp-node:hover { background: #5a4836; }
+  #sidePanel .sp-node.hl-node { background: #c0762e; color: #fff6e6; }
+  #sidePanel .sp-node .sp-caret { width: 12px; text-align: center; flex-shrink: 0; color: #c8b898; }
+  #sidePanel .sp-node .sp-count { margin-left: auto; font-size: 10px; color: #b8a488; flex-shrink: 0; }
+  #sidePanel .sp-children { padding-left: 14px; }
+  #sidePanel .sp-node.sp-region { font-weight: bold; color: #f0e0c0; }
+  #sidePanel .sp-node.sp-city { color: #e8dcc0; }
+  #sidePanel .sp-node .sp-edit { background: #5a4836; color: #f0e4c8; border: 1px solid #8a6f52; border-radius: 4px; font-size: 10px; padding: 1px 5px; cursor: pointer; font-family: inherit; flex-shrink: 0; display: none; }
+  #sidePanel .sp-node:hover .sp-edit { display: inline-block; }
+  #sidePanel .sp-node .sp-edit:hover { background: #6a5540; }
+  #sidePanel .sp-node .sp-edit.ok { background: #8a5a2a; display: inline-block; }
+  #sidePanel .sp-node .sp-edit.no { background: #7a3a2a; display: inline-block; }
+  #sidePanel .sp-node input { flex: 1; min-width: 0; background: #5a4836; color: #f0e4c8; border: 1px solid #8a6f52; border-radius: 4px; padding: 2px 5px; font-size: 12px; font-family: inherit; }
+  #sidePanel .sp-tip { font-size: 10px; color: #b8a488; margin-top: 8px; line-height: 1.5; }
+  /* 地图联动高亮 */
+  #map circle.city.hl { stroke: #d0762e; stroke-width: 6; }
