@@ -31,7 +31,6 @@
         <option value="1" selected>1x（标准）</option>
         <option value="2">2x</option>
         <option value="4">4x</option>
-        <option value="8">8x</option>
       </select>
     </label>
     <label>词库 <select id="lexsel" onchange="setLex(this.value)"></select></label>
@@ -55,6 +54,7 @@
       <button class="fold-btn" onclick="toggleTools()" title="折叠工具按钮">»</button>
     </div>
     <svg id="map" viewBox="-500 -500 1000 1000" width="960" height="960"></svg>
+    <div class="map-coords" id="mapCoords"></div>
   </div>
 </div>
 </div>
@@ -65,17 +65,18 @@
   </div>
   <div class="sp-body">
     <button class="sp-export" onclick="exportPNG()" title="导出完整地图为 PNG（包含临时命名，不受缩放影响）">⬇ 导出图片</button>
-    <button class="sp-export small" onclick="exportData()" title="导出当前地图数据（种子 / 细胞数 / 城市数 / 领地数 + 领地城市名称），可导入恢复">⤓ 导出数据</button>
-    <button class="sp-export small" onclick="document.getElementById('importFile').click()" title="导入地图数据文件：自动用文件中的参数重新生成地图并恢复当时的名称">⤒ 导入数据</button>
-    <input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="onImportFile(event)">
+    <button class="sp-export small" onclick="exportData()" title="导出当前地图数据为 txt（种子 / 细胞数 / 城市数 / 领地数 + 领地城市名称），可用任意文本编辑器修改后导入恢复">⤓ 导出数据</button>
+    <button class="sp-export small" onclick="document.getElementById('importFile').click()" title="导入地图数据文件（txt）：自动用文件中的参数重新生成地图并恢复当时的名称">⤒ 导入数据</button>
+    <input type="file" id="importFile" accept=".txt,text/plain" style="display:none" onchange="onImportFile(event)">
+    <button class="sp-export small" id="addCityBtn" onclick="toggleAddCity()" title="新增模式：进入后鼠标移到地图上右下角显示坐标，点击地图放置新城市（自动命名 / 归属领地 / 连接道路），Esc 或再点退出">＋ 新增城市</button>
     <div class="sp-sec">名称管理 · 领地-城市</div>
     <div id="spTree"></div>
   </div>
 </aside>
-<script src="js/d3-mini.js?v=4"></script>
-<script src="js/d3-voronoi.js?v=4"></script>
-<script src="js/namer.js?v=4"></script>
-<script src="js/terrain-core.js?v=4"></script>
-<script src="js/ui.js?v=4"></script>
+<script src="js/d3-mini.js"></script>
+<script src="js/d3-voronoi.js"></script>
+<script src="js/namer.js"></script>
+<script src="js/terrain-core.js"></script>
+<script src="js/ui.js"></script>
 </body>
 </html>

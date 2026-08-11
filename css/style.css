@@ -58,6 +58,11 @@
   #sidePanel .sp-export:hover { background: #a06a30; }
   #sidePanel .sp-export.small { padding: 5px; font-size: 12px; background: #5a4836; color: #f0e4c8; border: 1px solid #8a6f52; }
   #sidePanel .sp-export.small:hover { background: #6a5540; }
+  /* 新增城市：按钮高亮态 + 地图右下角坐标浮层 */
+  #sidePanel .sp-export.small.active { background: #c0762e; color: #fff6e6; border-color: #e8b070; }
+  #sidePanel .sp-export.small.active:hover { background: #d0863e; }
+  .map-coords { position: absolute; right: 8px; bottom: 8px; z-index: 12; display: none; background: rgba(74,58,44,.92); color: #f0e4c8; font-size: 12px; font-family: Consolas, monospace; padding: 3px 9px; border-radius: 6px; border: 1px solid #8a6f52; pointer-events: none; white-space: nowrap; }
+  .map-coords.show { display: block; }
   #sidePanel .sp-sec { font-size: 12px; color: #e8c890; margin: 10px 0 6px; letter-spacing: 1px; border-bottom: 1px solid #6a5540; padding-bottom: 3px; }
   #sidePanel .sp-empty { font-size: 12px; color: #b8a488; padding: 6px 0; }
   /* 三级树 */
@@ -74,6 +79,8 @@
   #sidePanel .sp-node .sp-edit:hover { background: #6a5540; }
   #sidePanel .sp-node .sp-edit.ok { background: #8a5a2a; display: inline-block; }
   #sidePanel .sp-node .sp-edit.no { background: #7a3a2a; display: inline-block; }
+  #sidePanel .sp-node .sp-edit.del { background: #7a3a2a; }
+  #sidePanel .sp-node .sp-edit.del:hover { background: #8a4a3a; }
   #sidePanel .sp-node input { flex: 1; min-width: 0; background: #5a4836; color: #f0e4c8; border: 1px solid #8a6f52; border-radius: 4px; padding: 2px 5px; font-size: 12px; font-family: inherit; }
   #sidePanel .sp-tip { font-size: 10px; color: #b8a488; margin-top: 8px; line-height: 1.5; }
   /* 地图联动高亮 */
