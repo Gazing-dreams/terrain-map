@@ -5,7 +5,8 @@
   h1 { text-align: center; font-size: 22px; color: #f0e0c0; margin-bottom: 6px; letter-spacing: 2px; }
   .sub { text-align: center; font-size: 12px; color: #b8a488; margin-bottom: 16px; line-height: 1.7; }
   .sub b { color: #d8c090; }
-  .controls { display: flex; flex-wrap: nowrap; gap: 10px; justify-content: center; align-items: center; margin-bottom: 14px; background: #4a3a2c; border-radius: 10px; padding: 10px 14px; }
+  .controls { display: flex; flex-direction: column; gap: 8px; justify-content: center; align-items: center; margin-bottom: 14px; background: #4a3a2c; border-radius: 10px; padding: 10px 14px; }
+  .controls .ctrl-row { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: center; }
   .controls label { font-size: 13px; color: #d8c8a8; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
   .controls select, .controls input { background: #5a4836; color: #f0e4c8; border: 1px solid #8a6f52; border-radius: 6px; padding: 5px 8px; font-size: 13px; font-family: inherit; flex-shrink: 0; white-space: nowrap; }
   .controls button { background: #8a5a2a; color: #fff6e6; border: none; border-radius: 8px; padding: 7px 18px; font-size: 14px; cursor: pointer; font-family: inherit; letter-spacing: 1px; flex-shrink: 0; white-space: nowrap; }
@@ -37,7 +38,7 @@
   path.border { fill: none; stroke: #a08060; stroke-width: 1.6; stroke-dasharray: 12 4 2 4; opacity: .75; }
   path.road { fill: none; stroke: #4a2f16; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
   path.roadsea { fill: none; stroke: #4a2f16; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 5 4; opacity: .6; }
-  line.slope { stroke: #9a7b52; opacity: .5; }
+  line.slope { stroke: #9a7b52; opacity: .7; }
   circle.city { fill: #fdf6e3; stroke: #4a3018; stroke-width: 3; }
   text.city { font-family: Georgia, serif; fill: #3a2a18; font-size: 20px; font-weight: bold; paint-order: stroke; stroke: #f5ecd7; stroke-width: 3px; stroke-linejoin: round; }
   text.region { font-family: Georgia, serif; fill: #6a4a28; font-size: 36px; font-style: italic; letter-spacing: 3px; paint-order: stroke; stroke: #f5ecd7; stroke-width: 4px; stroke-linejoin: round; opacity: .85; }

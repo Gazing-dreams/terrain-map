@@ -242,7 +242,9 @@ function add() {
 }
 
 function mountains(mesh, n, r) {
-    r = r || 0.05;
+    r = r || 0.05 * mesh.extent.width;   // 山峰影响半径随世界规模等比放大（1x 时 = 0.05，显示不变）
+    var amp = mesh.extent.width;         // 山峰幅度随世界规模等比放大：与 slope/cone（随坐标×k）同比例，
+                                         // 归一化后山地起伏/坡度与 1x 完全一致（海湾质感、影线密度不变）
     var mounts = [];
     for (var i = 0; i < n; i++) {
         mounts.push([mesh.extent.width * (Math.random() - 0.5), mesh.extent.height * (Math.random() - 0.5)]);
@@ -252,7 +254,7 @@ function mountains(mesh, n, r) {
         var p = mesh.vxs[i];
         for (var j = 0; j < n; j++) {
             var m = mounts[j];
-            newvals[i] += Math.pow(Math.exp(-((p[0] - m[0]) * (p[0] - m[0]) + (p[1] - m[1]) * (p[1] - m[1])) / (2 * r * r)), 2);
+            newvals[i] += amp * Math.pow(Math.exp(-((p[0] - m[0]) * (p[0] - m[0]) + (p[1] - m[1]) * (p[1] - m[1])) / (2 * r * r)), 2);
         }
     }
     return newvals;
@@ -598,7 +600,7 @@ function getRoads(render) {
     var pairDists = [];
     for (var i = 0; i < n; i++) for (var j = i + 1; j < n; j++) pairDists.push(euclid(mesh.vxs[cities[i]], mesh.vxs[cities[j]]));
     pairDists.sort(function (a, b) { return a - b; });
-    var LIMIT = Math.min(pairDists[Math.floor(pairDists.length * 0.6)] * 1.3, 0.38);   // 超长阈值：动态自适应 + 硬上限 0.38 世界（≈380 viewBox）
+    var LIMIT = Math.min(pairDists[Math.floor(pairDists.length * 0.6)] * 1.3, 0.38 * mesh.extent.width);   // 超长阈值：动态自适应 + 随世界规模（分辨率档位）等比放大
     var inTreeCity = {}; inTreeCity[0] = true;      // cities 数组下标是否已接入
     var connected = 1;
     var tried = {};                                 // 本次尝试过但超长的城市（延迟）
@@ -810,7 +812,8 @@ function drawPaths(svg, cls, paths) {
 function visualizeSlopes(svg, render) {
     var h = render.h;
     var strokes = [];
-    var r = 0.25 / Math.sqrt(h.length);
+    var k = h.mesh.extent.width;                 // 世界规模倍率：影线长度/线宽随世界等比放大，显示效果与 1x 一致
+    var r = 0.25 / Math.sqrt(h.length) * k;
     for (var i = 0; i < h.length; i++) {
         if (h[i] <= 0 || isnearedge(h.mesh, i)) continue;
         var nbs = neighbours(h.mesh, i);
@@ -824,6 +827,8 @@ function visualizeSlopes(svg, render) {
         }
         s /= nbs.length;
         s2 /= nbs.length;
+        s *= k;      // 世界放大 k 倍 → 世界单位梯度缩小 1/k → 补偿恢复（影线密度/坡度阈值/形态与 1x 完全一致）
+        s2 *= k;
         if (Math.abs(s) < runif(0.1, 0.4)) continue;
         var l = r * runif(1, 2) * (1 - 0.2 * Math.pow(Math.atan(s), 2)) * Math.exp(s2/100);
         var x = h.mesh.vxs[i][0];
@@ -852,6 +857,7 @@ function visualizeSlopes(svg, render) {
         .attr('y1', function (d) {return 1000*d[0][1]})
         .attr('x2', function (d) {return 1000*d[1][0]})
         .attr('y2', function (d) {return 1000*d[1][1]})
+        .attr('stroke-width', k * 1.25);   // 线宽随世界规模等比放大并略加粗（显示 ≈1.2px，1x 时 = 1.25）
 }
 
 function visualizeCities(svg, render) {
@@ -997,7 +1003,10 @@ function makeNameZh(key, lex, terr) {
     }
     if (zhOk(name)) return name;
   }
-  return '无名地' + (zhUsed.length + 1);
+  /* 兜底：组合空间极端紧张时返回序号唯一名（必须入表，否则多个兜底名会完全相同导致重名）*/
+  var fb = '无名地' + (zhUsed.length + 1);
+  zhUsed.push(fb);
+  return fb;
 }
 /* 词库注册表：运行时由外部词库脚本填充（lexicons/lex-<id>.js 定义 window.LEX_DEFS[id]）。
    HTML 仅内置原版（英文音素）词库；新增词库 = 在 lexicons 文件夹加 .js 文件，

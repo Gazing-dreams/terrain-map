@@ -141,7 +141,13 @@ function makeName(lang, key) {
     key = key || '';
     lang.genitive = lang.genitive || getMorpheme(lang, 'of');
     lang.definite = lang.definite || getMorpheme(lang, 'the');
+    var tries = 0;
     while (true) {
+        if (++tries > 2000) {   // 防呆：名字组合极端紧张时给唯一兜底名（正常场景不会触发）
+            var fb = 'Unnamed' + (lang.names.length + 1);
+            lang.names.push(fb);
+            return fb;
+        }
         var name = null;
         if (Math.random() < 0.5) {
             name = capitalize(getWord(lang, key));

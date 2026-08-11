@@ -81,17 +81,22 @@ function randomSeed() {
   document.getElementById('seed').value = seed;
   document.getElementById('status').textContent = '随机种子已填入：' + seed + '（点「生成地图」生成）';
 }
-/* ---- 地图缩放（viewBox 动态控制：滚轮缩放 + 拖拽平移 + 双击复位 + 按钮组）---- */
+/* ---- 地图缩放（viewBox 动态控制：滚轮缩放 + 拖拽平移 + 双击复位 + 按钮组）----
+   worldK = 当前世界规模倍率（世界规模档位 1/2/4/8），世界边长 = 1000*worldK
+   全貌 / 复位 / 缩放边界始终基于当前世界范围（世界变大后仍可看到完整地图） */
+var worldK = 1;   // 世界规模档位倍率（由 #resol 决定，gen 时同步）
+function worldW() { return 1000 * worldK; }
 var vb = { x: -500, y: -500, w: 1000, h: 1000 };
 var VB_MIN_W = 1000 / 8; // 最大放大 8 倍
 var mapEl = document.getElementById('map');
 function applyVB() { mapEl.setAttribute('viewBox', vb.x + ' ' + vb.y + ' ' + vb.w + ' ' + vb.h); }
 function clampVB() {
-  if (vb.w < VB_MIN_W) { var k = VB_MIN_W / vb.w; vb.w = VB_MIN_W; vb.h *= k; }
-  if (vb.w > 1000) { var k = 1000 / vb.w; vb.w = 1000; vb.h *= k; }
-  var maxX = -500 + 1000 - vb.w, maxY = -500 + 1000 - vb.h;
-  if (vb.x < -500) vb.x = -500; if (vb.x > maxX) vb.x = maxX;
-  if (vb.y < -500) vb.y = -500; if (vb.y > maxY) vb.y = maxY;
+  var W = worldW(), half = -500 * worldK;
+  if (vb.w < VB_MIN_W * worldK) { var k = (VB_MIN_W * worldK) / vb.w; vb.w = VB_MIN_W * worldK; vb.h *= k; }
+  if (vb.w > W) { var k = W / vb.w; vb.w = W; vb.h *= k; }
+  var maxX = half + W - vb.w, maxY = half + W - vb.h;
+  if (vb.x < half) vb.x = half; if (vb.x > maxX) vb.x = maxX;
+  if (vb.y < half) vb.y = half; if (vb.y > maxY) vb.y = maxY;
 }
 function zoomAt(cx, cy, factor) {
   vb.w *= factor; vb.h *= factor;
@@ -99,7 +104,7 @@ function zoomAt(cx, cy, factor) {
   clampVB(); applyVB();
 }
 function zoomBy(f) { zoomAt(vb.x + vb.w / 2, vb.y + vb.h / 2, f); }
-function resetView() { vb = { x: -500, y: -500, w: 1000, h: 1000 }; applyVB(); }
+function resetView() { vb = { x: -500 * worldK, y: -500 * worldK, w: 1000 * worldK, h: 1000 * worldK }; applyVB(); }
 mapEl.addEventListener('wheel', function (e) {
   e.preventDefault();
   var r = mapEl.getBoundingClientRect();
@@ -125,7 +130,23 @@ window.addEventListener('mouseup', function () {
   if (drag) { drag = null; mapEl.classList.remove('dragging'); }
 });
 mapEl.addEventListener('dblclick', resetView);
-/* ---- 地图自适应视口：svg 保持正方形，尺寸 = min(容器宽, 视口剩余高) ---- */
+/* ---- 世界规模档位（extent）：1x / 2x / 4x / 8x ----
+   档位提高 → 世界面积等比放大（×倍率²）→ 同一显示区域可容纳更多领地/城市
+   地图组件（显示尺寸）固定不变；缩放 / 全貌 / 复位始终基于当前世界范围 */
+function resScale() {
+  var el = document.getElementById('resol');
+  var v = el ? parseInt(el.value, 10) : 1;
+  return (v >= 1 && v <= 8) ? v : 1;
+}
+/* 城市/领地上限随档位提高：世界边长 k 倍 → 城市上限 40k、领地上限 15k */
+function updateCapacityLimits() {
+  var k = resScale();
+  var nc = document.getElementById('ncities');
+  var nt = document.getElementById('nterrs');
+  if (nc) nc.max = 40 * k;
+  if (nt) nt.max = 15 * k;
+}
+/* ---- 地图组件尺寸固定：svg 保持正方形，尺寸 = min(960, 容器宽, 视口剩余高)，不随屏幕分辨率扩大 ---- */
 function fitSvg() {
   var box = document.querySelector('.mapbox');
   var top = box.getBoundingClientRect().top; // mapbox 顶部到视口顶（含头部与 body padding）
@@ -141,6 +162,17 @@ window.addEventListener('resize', function () {
   else fitSvg();
 });
 fitSvg();
+updateCapacityLimits();
+/* 世界规模档位切换：只更新容量上限并提示，不自动生成（由用户点「生成地图」应用新规模） */
+(function () {
+  var sel = document.getElementById('resol');
+  if (!sel) return;
+  sel.addEventListener('change', function () {
+    var k = resScale();
+    updateCapacityLimits();
+    statusbar('世界规模：' + k + 'x —— 世界面积 ' + (k * k) + ' 倍，可容纳更多领地（点「生成地图」应用新规模）');
+  });
+})();
 /* ---- 网页内全屏：mapbox 放大占满整个网页（再点还原），非浏览器全屏 ---- */
 function applyFsSize() {
   // 全屏时 svg 放大到视口允许的最大正方形（与 CSS max-width/max-height 一致）
@@ -201,9 +233,9 @@ function exportPNG() {
   }
   var status = document.getElementById('status');
   status.textContent = '正在导出图片…';
-  var ex = defaultParams.extent;                              // extent 恒为 1x1，此处按生成逻辑通用计算
+  var ex = (render && render.params && render.params.extent) || defaultParams.extent;  // 当前世界规模档位
   var fullVB = (-1000 * ex.width / 2) + ' ' + (-1000 * ex.height / 2) + ' ' +
-               (1000 * ex.width) + ' ' + (1000 * ex.height);  // -500 -500 1000 1000
+               (1000 * ex.width) + ' ' + (1000 * ex.height);
   var scale = 2;                                              // 导出分辨率倍率
   var cw = Math.round(1000 * ex.width * scale);
   var ch = Math.round(1000 * ex.height * scale);
@@ -432,7 +464,7 @@ function exportData() {
       npts: lastGenParams.npts,
       ncities: lastGenParams.ncities,
       nterrs: lastGenParams.nterrs,
-      extent: { width: defaultExtent.width, height: defaultExtent.height }
+      extent: lastGenParams.extent || { width: 1, height: 1 }
     },
     names: { regions: regs, cities: cts }
   };
@@ -462,6 +494,14 @@ function onImportFile(e) {
       if (p.npts) document.getElementById('npts').value = p.npts;
       if (p.ncities) document.getElementById('ncities').value = p.ncities;
       if (p.nterrs) document.getElementById('nterrs').value = p.nterrs;
+      /* 恢复世界规模档位 */
+      if (p.extent && p.extent.width) {
+        var k = Math.round(p.extent.width);
+        var sel = document.getElementById('resol');
+        if (sel && [1, 2, 4, 8].indexOf(k) >= 0) sel.value = String(k);
+        worldK = (k >= 1 && k <= 8) ? k : 1;
+      }
+      updateCapacityLimits();
       pendingNames = data.names || null;
       statusbar('正在导入：种子 ' + (p.seedTxt != null ? p.seedTxt : p.seed) + ' …');
       gen();
@@ -511,12 +551,19 @@ function gen() {
   params.npts = parseInt(document.getElementById('npts').value, 10);
   params.ncities = parseInt(document.getElementById('ncities').value, 10) || 15;
   params.nterrs = Math.min(parseInt(document.getElementById('nterrs').value, 10) || 5, params.ncities);
+  /* 世界规模档位 → extent：世界等比放大（面积 = 倍率²），组件尺寸不变，同屏容纳更多领地 */
+  var k = resScale();
+  worldK = k;
+  params.extent = { width: k, height: k };
+  vb = { x: -500 * k, y: -500 * k, w: 1000 * k, h: 1000 * k };  // 缩放状态同步到新世界全貌
+  updateCapacityLimits();
   lastGenParams = {   // 记录本次生成生效的参数（导出数据用；种子以最终数字为准，可复现）
     seed: seed,
     seedTxt: document.getElementById('seed').value.trim() || String(seed),
     npts: params.npts,
     ncities: params.ncities,
-    nterrs: params.nterrs
+    nterrs: params.nterrs,
+    extent: { width: k, height: k }
   };
   var status = document.getElementById('status');
   var gb = document.getElementById('genbtn');

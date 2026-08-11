@@ -11,20 +11,32 @@
 <h1>程序化大陆</h1>
 <p class="sub">来源：<b>mewo2/terrain</b>（MIT · 2016 · 1073 行单文件）</p>
 <div class="controls">
-  <label>细胞数
-    <select id="npts">
-      <option value="4096">4k（快）</option>
-      <option value="8192">8k（中）</option>
-      <option value="16384" selected>16k（默认）</option>
-      <option value="32768">32k（高细节）</option>
-      <option value="65536">64k（最高·重）</option>
-    </select>
-  </label>
-  <label>领地数 <input id="nterrs" type="number" value="5" min="1" max="15" style="width:50px" title="领地（区域）数量，自动不超过城市数"></label>
-  <label>城市数 <input id="ncities" type="number" value="15" min="4" max="40" style="width:60px"></label>
-  <label>种子 <input id="seed" type="text" placeholder="留空 = 随机" style="width:130px"><button type="button" onclick="randomSeed()" title="随机种子" class="seed-rnd">↻</button></label>
-  <button id="genbtn" onclick="gen()">生成地图</button>
-  <label>词库 <select id="lexsel" onchange="setLex(this.value)"></select></label>
+  <div class="ctrl-row">
+    <label>细胞数
+      <select id="npts">
+        <option value="4096">4k（快）</option>
+        <option value="8192">8k（中）</option>
+        <option value="16384" selected>16k（默认）</option>
+        <option value="32768">32k（高细节）</option>
+        <option value="65536">64k（最高·重）</option>
+      </select>
+    </label>
+    <label>领地数 <input id="nterrs" type="number" value="5" min="1" max="15" style="width:50px" title="领地（区域）数量，自动不超过城市数"></label>
+    <label>城市数 <input id="ncities" type="number" value="15" min="4" max="40" style="width:60px"></label>
+    <label>种子 <input id="seed" type="text" placeholder="留空 = 随机" style="width:130px"><button type="button" onclick="randomSeed()" title="随机种子" class="seed-rnd">↻</button></label>
+  </div>
+  <div class="ctrl-row">
+    <label>世界规模
+      <select id="resol" title="地图世界规模：面积按倍率²等比放大，组件尺寸不变，同屏可容纳更多领地（切换后点「生成地图」应用）">
+        <option value="1" selected>1x（标准）</option>
+        <option value="2">2x</option>
+        <option value="4">4x</option>
+        <option value="8">8x</option>
+      </select>
+    </label>
+    <label>词库 <select id="lexsel" onchange="setLex(this.value)"></select></label>
+    <button id="genbtn" onclick="gen()">生成地图</button>
+  </div>
 </div>
 <div id="status">点击「生成地图」开始</div>
 <div class="mapbox">
@@ -60,10 +72,10 @@
     <div id="spTree"></div>
   </div>
 </aside>
-<script src="js/d3-mini.js"></script>
-<script src="js/d3-voronoi.js"></script>
-<script src="js/namer.js"></script>
-<script src="js/terrain-core.js"></script>
-<script src="js/ui.js"></script>
+<script src="js/d3-mini.js?v=4"></script>
+<script src="js/d3-voronoi.js?v=4"></script>
+<script src="js/namer.js?v=4"></script>
+<script src="js/terrain-core.js?v=4"></script>
+<script src="js/ui.js?v=4"></script>
 </body>
 </html>
