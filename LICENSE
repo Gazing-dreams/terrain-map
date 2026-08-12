@@ -1,10 +1,7 @@
 MIT License
 
-Copyright (c) 2016 Martin O'Leary (mewo2/terrain 原作者)
-Copyright (c) 2026 Gazing-dreams (本衍生项目)
-
-本项目基于 mewo2/terrain (https://github.com/mewo2/terrain) 改造而来。
-原项目版权归 Martin O'Leary 所有，本衍生项目版权归 Gazing-dreams 所有。
+Copyright (c) 2016 Martin O'Leary
+Copyright (c) 2026 Gazing-dreams
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -23,3 +20,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+本项目基于 mewo2/terrain (https://github.com/mewo2/terrain) 改造而来。
+原项目版权归 Martin O'Leary 所有，本衍生项目版权归 Gazing-dreams 所有。
