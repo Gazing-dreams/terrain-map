@@ -532,12 +532,13 @@ function getRivers(h, limit) {
     return mergeSegments(links).map(relaxPath);
 }
 
-/* ============ 城市间道路：领地辐射 + 首都 MST（Prim-Dijkstra 混合）============
-   阶段 A：每个城镇（非首都）沿网格最短路径连接到【自己领地的首都】（卫星城辐射，2.1）
-   阶段 B：首都之间跑 Prim-Dijkstra 混合 MST —— 相邻优先、短路径优先（2.1/2.3）
+/* ============ 城市间道路：MST 主干 + 领地辐射（Prim-Dijkstra 混合）============
+   阶段 A：短路径优先 MST —— 每次接入欧氏距离最近的未接入城市（相邻优先），
+           超长连接（> LIMIT）延迟到最后才允许（满足全连通前提下禁止超长路线）
+   阶段 B：补充 城镇→领地首都 直达（连接倾向次高；与 MST 重复的边自动去重）
    权重：上坡 x1.2 轻罚、过海 x15 重罚（弱化惩罚 → 路线更短更直，2.3）
-   兜底：首都强制全部入树（2.2 绝对全连通）；边去重防 mergeSegments 错乱
-   依赖现有：mesh/neighbours/distance/mergeSegments/relaxPath/PriorityQueue
+   兜底：仍未接入的城市沿地形 trace 连最近已入树城市（真正不可达才直线）
+   依赖现有：mesh/roadTrace/cityEuclid/makeRoadCollector/PriorityQueue
    =============================================================== */
 /* 公共寻路：沿网格从 src 到 target 的最短路径（含过海/上坡/避边权重）。
    cityVerts 可空：传城市顶点集合时对边缘带（非城市）重罚，避免道路贴近地图边框。
@@ -616,6 +617,7 @@ function makeRoadCollector(render) {
    道路生成参考原始 getRoads 两阶段逻辑（增量版，原道路不动）：
    阶段 A：接入路网中欧氏距离最近的已有城市（MST 主干连接，参考 getRoads 阶段 A）
    阶段 B：补充 领地首都 直达（参考 getRoads 阶段 B；与阶段 A 目标相同则跳过，避免重复）
+   两阶段寻路均传入路网吸引（render.__roadSeen）：新路沿旧路走廊汇入，避免锐角/交叉。
    边收集/去重/合并复用公共 makeRoadCollector（与 getRoads 同一套逻辑）。
    返回 {cap, landPaths, seaPaths}：cap=领地首都索引，路径为 mergeSegments+relaxPath 后的可绘制路径数组 */
 function addCityToRender(render, vx) {
@@ -671,7 +673,7 @@ function getRoads(render) {
     var pairDists = [];
     for (var i = 0; i < n; i++) for (var j = i + 1; j < n; j++) pairDists.push(cityEuclid(mesh, cities[i], cities[j]));
     pairDists.sort(function (a, b) { return a - b; });
-    var LIMIT = Math.min(pairDists[Math.floor(pairDists.length * 0.6)] * 1.3, 0.38 * mesh.extent.width);   // 超长阈值：动态自适应 + 随世界规模（分辨率档位）等比放大
+    var LIMIT = Math.min(pairDists[Math.floor(pairDists.length * 0.6)] * 1.3, 0.38 * mesh.extent.width);   // 超长阈值：动态自适应 + 随世界规模档位等比放大
     var inTreeCity = {}; inTreeCity[0] = true;      // cities 数组下标是否已接入
     var connected = 1;
     var tried = {};                                 // 本次尝试过但超长的城市（延迟）
@@ -974,7 +976,7 @@ function terrCenter(h, terr, city, landOnly) {
    地形标签（通用，与词库无关）：
      城市 {coast 临海, wet 近河/湖}  领地 {flat 平坦, dry 干燥河流少, wet 河流多}
    词库对象按地形标签提供名字部件池 → 新增词库只需在 LEXICONS 加条目，
-   即可复用同一套地形分类与生成逻辑（不再是 DND 词库的专用代码）。
+   即可复用同一套地形分类与生成逻辑（不再是特定词库（奇幻/仙侠）的专用代码）。
    =============================================================== */
 var zhUsed = [];
 function zhPick(s) { return s[Math.floor(Math.random() * s.length)]; }
@@ -1079,7 +1081,7 @@ function makeNameZh(key, lex, terr) {
 }
 /* 词库注册表：运行时由外部词库脚本填充（lexicons/lex-<id>.js 定义 window.LEX_DEFS[id]）。
    HTML 仅内置原版（英文音素）词库；新增词库 = 在 lexicons 文件夹加 .js 文件，
-   并把 id 加入 HTML 内置的 EXTERNAL_LEXES 清单。词库缺失/加载失败时回退原版。 */
+   并把 id 加入 lexicons/index.js 的 LEX_MANIFEST 清单（HTML 无需改动）。词库缺失/加载失败时回退原版。 */
 var LEXICONS = {};
 function getLex() { return LEXICONS[currentLex] || null; }
 var lastLang = null;    // 最近一次生成的英文命名上下文（makeName 去重池），供手动新增城市命名复用
@@ -1205,7 +1207,7 @@ function drawLabels(svg, render) {
         .attr('y', function (d) {return 1000*d.y})
         .style('font-size', function (d) {return d.size})
         .style('text-anchor', function (d) {return d.align})
-        .classed('dnd', currentLex !== 'orig')
+        .classed('fantasy', currentLex !== 'orig')
         .text(function (d) {return currentLex !== 'orig' ? d.textZh : d.text})
         .raise();
 
@@ -1278,7 +1280,7 @@ function drawLabels(svg, render) {
         .attr('y', function (d) {return 1000*d.y})
         .style('font-size', function (d) {return 1000*d.size})
         .style('text-anchor', 'middle')
-        .classed('dnd', currentLex !== 'orig')
+        .classed('fantasy', currentLex !== 'orig')
         .text(function (d) {return currentLex !== 'orig' ? d.textZh : d.text})
         .raise();
 

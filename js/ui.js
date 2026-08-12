@@ -24,8 +24,8 @@ var currentLex = 'orig';
 function setLex(v) {
   currentLex = LEXICONS[v] ? v : 'orig';
   var zh = currentLex !== 'orig';
-  d3.selectAll('text.city').classed('dnd', zh).text(function (d) {return zh ? d.textZh : d.text;});
-  d3.selectAll('text.region').classed('dnd', zh).text(function (d) {return zh ? d.textZh : d.text;});
+  d3.selectAll('text.city').classed('fantasy', zh).text(function (d) {return zh ? d.textZh : d.text;});
+  d3.selectAll('text.region').classed('fantasy', zh).text(function (d) {return zh ? d.textZh : d.text;});
 }
 /* 词库下拉动态生成（按运行时已加载的词库）*/
 function buildLexSelect() {
@@ -250,7 +250,7 @@ function exportPNG() {
   /* 克隆 SVG（保留 id 与图层 class，隐藏状态随样式注入生效），注入页面全部样式 */
   var clone = map.cloneNode(true);
   clone.setAttribute('viewBox', fullVB);
-  var hlEls = clone.querySelectorAll('.hl');   // 导出时不带联动高亮（临时命名保留）
+  var hlEls = clone.querySelectorAll('.hl');   // 导出时不带联动高亮（用户修改的名称保留）
   for (var hi = 0; hi < hlEls.length; hi++) hlEls[hi].classList.remove('hl');
   var styles = [];
   var sels = document.querySelectorAll('style');
@@ -447,7 +447,8 @@ mapEl.addEventListener('click', function (e) {
 /* ---- 手动新增城市 ----
    侧栏按钮切换新增模式；鼠标在地图上移动时右下角浮层实时显示世界坐标（离开隐藏）；
    点击地图放置新城市：校验陆地/未占用 → 自动命名（当前词库 + 去重）→ 归入所在领地
-   （terr[vx] 原有归属）→ 从领地首都增量连接道路（roadTrace，与原逻辑一致，原道路不变）；
+   （terr[vx] 原有归属）→ 参考原始 getRoads 两阶段增量连路（MST 最近城市主干 +
+   领地首都直达，含路网吸引，原道路不动）；
    记入 extraCities 供导出 txt 与导入恢复；不触碰 viewBox，缩放/平移状态下照常可用。 */
 var addCityMode = false;
 var extraCities = [];        // 手动新增城市记录（导出/导入）：[{x, y, name}] 世界坐标 + 当前显示名
@@ -512,7 +513,7 @@ function placeExtraCity(render, vx, displayName) {
   var p = render.h.mesh.vxs[vx];
   var zh = currentLex !== 'orig';
   var t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-  t.setAttribute('class', 'city' + (zh ? ' dnd' : ''));
+  t.setAttribute('class', 'city' + (zh ? ' fantasy' : ''));
   t.setAttribute('x', 1000 * p[0]);
   t.setAttribute('y', 1000 * (p[1] - 0.016 * worldK));
   t.setAttribute('text-anchor', 'middle');
@@ -601,14 +602,15 @@ function deleteCity(idx, silent, noRecord) {
 /* ---- 地图数据导出 / 导入：保存影响随机地图的参数（种子 / 细胞数 / 城市数 / 领地数）
    与领地城市名称，导入时自动恢复当时的地图与名称 ---- */
 var lastGenParams = null;   // 最近一次生成生效的参数（导出数据用）
-var pendingNames = null;    // 导入待应用的名称 {regions:[], cities:[]}
+var pendingNames = null;    // 导入待应用的名称 {byIndex, byRegionIndex}（按索引恢复）
 
 function statusbar(msg) {
   var st = document.getElementById('status');
   if (st) st.textContent = msg;
 }
-/* ---- 导出：易读纯文本（参数 + 领地城市归属 + 新增城市坐标），可直接编辑后导入 ----
-   城市名按内部索引 [序号] 输出（索引 = 城市数组下标，导入按索引恢复，与生成顺序无关）*/
+/* ---- 导出：易读纯文本（字段名为英文：Seed / World Scale / Cells / Territories / Cities + 领地城市归属），可直接编辑后导入 ----
+   城市名按【原始索引】[序号] 输出（生成时的索引；删除的城市位置补齐、带 (deleted) 标记，
+   新增城市索引 = 基础城市数 + 放置序号）——导入按同一索引恢复，与当前数组下标无关 */
 function exportData() {
   if (!lastGenParams || !render || !render.cities) { statusbar('先生成地图，再导出数据'); return; }
   var cityEls = document.querySelectorAll('#map text.city');
@@ -620,15 +622,25 @@ function exportData() {
   var nterrs = Math.min(render.params.nterrs, render.cities.length);
   var baseN = lastGenParams.ncities;              // 基础城市数：索引 >= baseN 的是手动新增
   var lines = [];
-  lines.push('# 程序化大陆 · 地图数据（纯文本，可直接编辑后导入）');
-  lines.push('种子: ' + lastGenParams.seedTxt);
-  lines.push('世界规模: ' + (lastGenParams.extent ? lastGenParams.extent.width : 1) + 'x');
-  lines.push('细胞数: ' + lastGenParams.npts);
-  lines.push('领地数: ' + lastGenParams.nterrs);
-  lines.push('城市数: ' + lastGenParams.ncities);
-  lines.push('新增城市数: ' + extraCities.length);
+  lines.push('# Procedural Continent - Map Data | 程序化大陆·地图数据');
+  lines.push('# Plain text — edit & re-import | 纯文本，可直接修改后重新导入');
+  lines.push('# Seed: 种子（同种子可复现）| map seed, same seed → same map');
+  lines.push('# World Scale: 世界规模倍率（1x/2x/4x）| world size multiplier');
+  lines.push('# Cells: 细胞数（地形细节）| terrain detail level');
+  lines.push('# Territories: 领地数 | territory count');
+  lines.push('# Cities: 城市数 | city count');
+  lines.push('# New Cities: 手动新增城市数 | manually added city count');
+  lines.push('Seed: ' + lastGenParams.seedTxt);
+  lines.push('World Scale: ' + (lastGenParams.extent ? lastGenParams.extent.width : 1) + 'x');
+  lines.push('Cells: ' + lastGenParams.npts);
+  lines.push('Territories: ' + lastGenParams.nterrs);
+  lines.push('Cities: ' + lastGenParams.ncities);
+  lines.push('New Cities: ' + extraCities.length);
   lines.push('');
-  lines.push('# 领地与城市归属（[序号] 城市名；带括号 (x, y) 为新增城市，括号内「已删除」为删除标记，均可直接修改）');
+  lines.push('# Territory-City Membership | 领地与城市归属');
+  lines.push('# [序号] 城市名 — 普通城市 | normal city');
+  lines.push('# [序号] 城市名(x, y) — 新增城市，改括号内坐标可移动 | new city, edit coords to move');
+  lines.push('# [序号] 城市名 (deleted) — 已删除城市，去掉标记即恢复 | deleted, remove marker to restore');
   /* 原始索引重建：初始城市按已删除记录补齐原始索引——删除后当前索引会前移，导入必须按原始索引恢复 */
   var delSet = {};
   for (var dd = 0; dd < deletedCities.length; dd++) delSet[deletedCities[dd].idx] = true;
@@ -641,7 +653,7 @@ function exportData() {
     oi++;
   }
   for (var r = 0; r < nterrs; r++) {
-    lines.push('[' + (regNames[r] || ('领地' + (r + 1))) + ']');
+    lines.push('[' + (regNames[r] || ('Territory ' + (r + 1))) + ']');
     lines.push('  [' + r + '] ' + cityNames[r]);   // 首都原始索引 = r（首都不可删，索引不变）
     var mems = [];
     /* 现有初始城市（跳过首都行，首都已单独输出）*/
@@ -662,7 +674,7 @@ function exportData() {
     for (var mi2 = 0; mi2 < mems.length; mi2++) {
       var it = mems[mi2];
       if (it.kind === 'del') {
-        lines.push('  [' + it.idx + '] ' + it.name + '（已删除）');
+        lines.push('  [' + it.idx + '] ' + it.name + ' (deleted)');
       } else if (it.kind === 'extra') {
         lines.push('  [' + it.idx + '] ' + cityNames[it.ci] + ' (' + extraCities[it.ej].x + ', ' + extraCities[it.ej].y + ')');
       } else {
@@ -675,13 +687,14 @@ function exportData() {
   downloadBlob(blob, '地图数据-种子' + lastGenParams.seedTxt + '.txt');
   statusbar('已导出数据：种子 ' + lastGenParams.seedTxt + ' · ' + regNames.length + ' 领地 / ' + cityNames.length + ' 城市（含新增 ' + extraCities.length + '）');
 }
-/* 解析导入文件（txt 纯文本），返回统一结构
+/* 解析导入文件（txt 纯文本，最新版格式：英文字段名 + 中英双语注释），返回统一结构
    { params, names, extraCities, deletedCities }
    - params: { seedTxt, npts, ncities, nterrs, extent }
    - names: { byIndex, byRegionIndex }（按索引恢复名称）
    - extraCities: [{x, y, name}]（带坐标括号的城市）
-   - deletedCities: [{idx, name}]（带「已删除」标记的城市，按索引删除）
-   归属列表行格式：城市名后带括号 (x, y) → 新增；括号内「已删除」→ 删除标记；无括号 → 普通城市 */
+   - deletedCities: [{idx, name}]（带 (deleted) 标记的城市，按索引删除）
+   归属列表行格式：城市名后带括号 (x, y) → 新增；括号内 deleted → 删除标记；无括号 → 普通城市。
+   仅支持最新版格式（Seed / World Scale / Cells / Territories / Cities），不再兼容旧中文字段名 */
 function parseMapData(text) {
   var s = String(text).replace(/^\uFEFF/, '').trim();
   if (!s) return null;
@@ -693,11 +706,11 @@ function parseMapData(text) {
     var line = lines[i].trim();
     if (!line || line.charAt(0) === '#') continue;
     var m;
-    if ((m = line.match(/^种子[:：]\s*(.+)$/))) { params.seedTxt = m[1].trim(); }
-    else if ((m = line.match(/^世界规模[:：]\s*(\d+)/i))) { var kv = Math.min(Math.round(+m[1]), 4) || 1; params.extent = { width: kv, height: kv }; }
-    else if ((m = line.match(/^细胞数[:：]\s*(\d+)/))) { params.npts = +m[1]; }
-    else if ((m = line.match(/^领地数[:：]\s*(\d+)/))) { params.nterrs = +m[1]; }
-    else if ((m = line.match(/^城市数[:：]\s*(\d+)/))) { params.ncities = +m[1]; }
+    if ((m = line.match(/^Seed\s*[:：]\s*(.+)$/i))) { params.seedTxt = m[1].trim(); }
+    else if ((m = line.match(/^World\s*Scale\s*[:：]\s*(\d+)/i))) { var kv = Math.min(Math.round(+m[1]), 4) || 1; params.extent = { width: kv, height: kv }; }
+    else if ((m = line.match(/^Cells?\s*[:：]\s*(\d+)/i))) { params.npts = +m[1]; }
+    else if ((m = line.match(/^Territories?\s*[:：]\s*(\d+)/i))) { params.nterrs = +m[1]; }
+    else if ((m = line.match(/^Cities?\s*[:：]\s*(\d+)/i))) { params.ncities = +m[1]; }
     else if ((m = line.match(/^\[(.+)\]$/))) { byRegionIndex[Object.keys(byRegionIndex).length] = m[1].trim(); }
     else if ((m = line.match(/^\[(\d+)\]\s*(.+)$/))) {
       var idx = +m[1];
@@ -710,10 +723,10 @@ function parseMapData(text) {
         extraCities.push({ x: +cm[2], y: +cm[3], name: nm });
       } else {
         /* 删除标记括号 → 按索引删除（不写入 byIndex：该城市导入后将被删除）*/
-        var dm = nm.match(/^(.*?)\s*[（(]\s*已删除\s*[）)]\s*$/);
+        var dm = nm.match(/^(.*?)\s*[（(]\s*deleted\s*[）)]\s*$/i);
         if (dm) {
           nm = dm[1].trim();
-          deletedCities.push({ idx: idx, name: nm || ('城市' + idx) });
+          deletedCities.push({ idx: idx, name: nm || ('City ' + idx) });
         } else {
           nm = nm.trim();
           if (nm) byIndex[idx] = nm;
@@ -721,7 +734,7 @@ function parseMapData(text) {
       }
     }
   }
-  if (!params.seedTxt && !params.npts) throw new Error('缺少种子 / 细胞数等必要字段');
+  if (!params.seedTxt && !params.npts) throw new Error('缺少必要字段（需 Seed / Cells，仅支持最新版导出格式）');
   return { params: params, names: { byIndex: byIndex, byRegionIndex: byRegionIndex }, extraCities: extraCities, deletedCities: deletedCities };
 }
 function onImportFile(e) {
