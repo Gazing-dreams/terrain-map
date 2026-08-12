@@ -43,3 +43,5 @@ MIT License，详情见 [LICENSE](LICENSE)。本衍生项目保留原项目版�
 
 - 原项目 Copyright (c) 2016 Martin O'Leary（[mewo2/terrain](https://github.com/mewo2/terrain)）
 - 本衍生项目 Copyright (c) 2026 Gazing-dreams
+
+本项目基于 [mewo2/terrain](https://github.com/mewo2/terrain) 改造而来。原项目版权归 Martin O'Leary 所有，本衍生项目版权归 Gazing-dreams 所有。
