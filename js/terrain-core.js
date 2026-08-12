@@ -165,12 +165,7 @@ function isnearedge(mesh, i) {
 }
 
 function neighbours(mesh, i) {
-    var onbs = mesh.adj[i];
-    var nbs = [];
-    for (var i = 0; i < onbs.length; i++) {
-        nbs.push(onbs[i]);
-    }
-    return nbs;
+    return mesh.adj[i].slice();   // 浅拷贝邻接表（与原实现逐项复制等价）
 }
 
 function distance(mesh, i, j) {
@@ -547,7 +542,11 @@ function getRivers(h, limit) {
 /* 公共寻路：沿网格从 src 到 target 的最短路径（含过海/上坡/避边权重）。
    cityVerts 可空：传城市顶点集合时对边缘带（非城市）重罚，避免道路贴近地图边框。
    返回索引对数组（靠 src 的在前）或 null。手动新增城市连路与 getRoads 共用此函数，逻辑一致。 */
-function roadTrace(mesh, h, src, target, cityVerts) {
+/* 单源 Dijkstra（过海重罚：陆地优先、孤岛可渡海），src → target 的路径边（索引对，靠 src 的在前）。
+   attract（可选）：已有道路边集 {land:{key:true}, sea:{key:true}} —— 命中该集的网格边权重 ×0.3，
+   引导路径优先沿已有路网走（新道路先并入旧路走廊、接近目标才离开，避免首都处锐角分叉与穿插交叉）。
+   getRoads 全量生成时不传（null）→ 行为与原版一致；addCityToRender 增量连路时传入 render.__roadSeen */
+function roadTrace(mesh, h, src, target, cityVerts, attract) {
     var dist = [], prev = [];
     var pq = new PriorityQueue({comparator: function (a, b) {return a.d - b.d;}});
     dist[src] = 0;
@@ -565,6 +564,10 @@ function roadTrace(mesh, h, src, target, cityVerts) {
             if (h[v] <= 0) w *= 15;                 // 过海重罚：优先陆地，孤岛渡海（虚线显示）
             else if (h[v] > h[u]) w *= 1.2;         // 上坡轻罚（路线更短更直）
             if (cityVerts && isnearedge(mesh, v) && !cityVerts[v]) w *= 8;   // 边缘带（非城市顶点）重罚：避免贴近地图边框
+            if (attract) {                          // 路网吸引：已有道路边低权重 → 沿旧路走
+                var k2 = (u < v ? u + '|' + v : v + '|' + u);
+                if (attract.land[k2] || attract.sea[k2]) w *= 0.3;
+            }
             var nd = dist[u] + w;
             if (dist[v] === undefined || nd < dist[v]) { dist[v] = nd; prev[v] = u; pq.queue({v: v, d: nd}); }
         }
@@ -578,8 +581,42 @@ function roadTrace(mesh, h, src, target, cityVerts) {
     }
     return x === src ? segs : null;
 }
-/* 手动新增城市：把网格顶点 vx 作为城镇加入地图 —— 归入所在领地（terr[vx] 原有归属），
-   从领地首都增量寻路连接（roadTrace，与原道路生成逻辑一致），原道路不变。
+/* 公共：两城市（网格顶点索引）的欧氏距离 —— getRoads / addCityToRender 共用 */
+function cityEuclid(mesh, a, b) {
+    var dx = mesh.vxs[a][0] - mesh.vxs[b][0], dy = mesh.vxs[a][1] - mesh.vxs[b][1];
+    return Math.sqrt(dx * dx + dy * dy);
+}
+/* 公共：道路边收集器 —— 陆/海分组 + 去重，done() 产出 mergeSegments+relaxPath 路径
+   getRoads（全量）与 addCityToRender（增量）共用同一套收边/去重/合并逻辑。
+   去重边集挂在 render.__roadSeen 上共享：getRoads 全量重算时重置（render 每次生成也是新的），
+   addCityToRender 增量沿用 —— 新道路与旧道路（含之前新增城市的路）走相同网格边时自动去重，
+   避免重叠/交叉/首都处锐角分叉 */
+function makeRoadCollector(render) {
+    if (!render.__roadSeen) render.__roadSeen = { land: {}, sea: {} };
+    var seenLand = render.__roadSeen.land, seenSea = render.__roadSeen.sea;
+    var land = [], sea = [];
+    return {
+        add: function (a, b) {                      // 接收网格顶点索引对
+            var h = render.h;
+            var key = (a < b ? a + '|' + b : b + '|' + a);
+            if (h[a] <= 0 || h[b] <= 0) {           // 任一端在海里 → 海上路段
+                if (seenSea[key]) return; seenSea[key] = true;
+                sea.push([h.mesh.vxs[a], h.mesh.vxs[b]]);
+            } else {
+                if (seenLand[key]) return; seenLand[key] = true;
+                land.push([h.mesh.vxs[a], h.mesh.vxs[b]]);
+            }
+        },
+        done: function () {
+            return { land: mergeSegments(land).map(relaxPath), sea: mergeSegments(sea).map(relaxPath) };
+        }
+    };
+}
+/* 手动新增城市：把网格顶点 vx 作为城镇加入地图 —— 归入所在领地（terr[vx] 原有归属）。
+   道路生成参考原始 getRoads 两阶段逻辑（增量版，原道路不动）：
+   阶段 A：接入路网中欧氏距离最近的已有城市（MST 主干连接，参考 getRoads 阶段 A）
+   阶段 B：补充 领地首都 直达（参考 getRoads 阶段 B；与阶段 A 目标相同则跳过，避免重复）
+   边收集/去重/合并复用公共 makeRoadCollector（与 getRoads 同一套逻辑）。
    返回 {cap, landPaths, seaPaths}：cap=领地首都索引，路径为 mergeSegments+relaxPath 后的可绘制路径数组 */
 function addCityToRender(render, vx) {
     var h = render.h, mesh = h.mesh;
@@ -588,47 +625,42 @@ function addCityToRender(render, vx) {
     for (var i = 0; i < render.cities.length; i++) cityVerts[render.cities[i]] = true;
     var cap = render.terr[vx];
     if (cap === undefined) cap = vx;                // 兜底（理论上 terr 全图覆盖）
-    var landSegs = [], seaSegs = [];
-    if (cap !== vx) {
-        var segs = roadTrace(mesh, h, cap, vx, cityVerts);
-        if (segs) {
-            var seen = {};
-            for (var k = segs.length - 1; k >= 0; k--) {
-                var a = segs[k][0], b = segs[k][1];
-                var key = (a < b ? a + '|' + b : b + '|' + a);
-                if (seen[key]) continue;            // 边去重（防 mergeSegments 错乱）
-                seen[key] = true;
-                if (h[a] <= 0 || h[b] <= 0) seaSegs.push([mesh.vxs[a], mesh.vxs[b]]);
-                else landSegs.push([mesh.vxs[a], mesh.vxs[b]]);
-            }
+    var col = makeRoadCollector(render);
+    var attract = render.__roadSeen;                // 路网吸引：已有道路边低权重，新路沿旧路走廊汇入（避免锐角/交叉）
+    /* 阶段 A：接入路网中欧氏距离最近的已有城市（主干连接）*/
+    var nPrev = render.cities.length - 1;           // 不含新城市
+    var nearJ = -1;
+    if (nPrev >= 1) {
+        var bestD = Infinity;
+        for (var i = 0; i < nPrev; i++) {
+            var d = cityEuclid(mesh, render.cities[i], vx);
+            if (d < bestD) { bestD = d; nearJ = i; }
+        }
+        if (nearJ >= 0) {
+            var segsA = roadTrace(mesh, h, render.cities[nearJ], vx, cityVerts, attract);
+            if (segsA) for (var k = segsA.length - 1; k >= 0; k--) col.add(segsA[k][0], segsA[k][1]);
         }
     }
-    var landPaths = mergeSegments(landSegs).map(relaxPath);
-    var seaPaths = mergeSegments(seaSegs).map(relaxPath);
-    for (var li = 0; li < landPaths.length; li++) render.landRoads.push(landPaths[li]);
-    for (var si = 0; si < seaPaths.length; si++) render.seaRoads.push(seaPaths[si]);
-    return {cap: cap, landPaths: landPaths, seaPaths: seaPaths};
+    /* 阶段 B：补充 领地首都 直达（首都不是阶段 A 目标时）*/
+    if (cap !== vx && cap !== (nearJ >= 0 ? render.cities[nearJ] : -1)) {
+        var segsB = roadTrace(mesh, h, cap, vx, cityVerts, attract);
+        if (segsB) for (var k = segsB.length - 1; k >= 0; k--) col.add(segsB[k][0], segsB[k][1]);
+    }
+    var out = col.done();
+    for (var li = 0; li < out.land.length; li++) render.landRoads.push(out.land[li]);
+    for (var si = 0; si < out.sea.length; si++) render.seaRoads.push(out.sea[si]);
+    return {cap: cap, landPaths: out.land, seaPaths: out.sea};
 }
 function getRoads(render) {
     var h = render.h, mesh = h.mesh;
     var cities = render.cities, terr = render.terr;
     var nterrs = Math.min(render.params.nterrs, cities.length);
     var n = cities.length;
-    if (n < 2) return {land: [], sea: []};
-    var landRoads = [], seaRoads = [];      // 陆地道路（实线）与海上道路（虚线）分开
-    var seenLand = {}, seenSea = {};
+    if (n < 2) { render.__roadSeen = { land: {}, sea: {} }; return {land: [], sea: []}; }
+    render.__roadSeen = { land: {}, sea: {} };      // 全量重算 → 重置共享去重边集（删城重连/重新生成场景）
+    var col = makeRoadCollector(render);            // 公共：陆/海分组 + 去重 + mergeSegments/relaxPath
     var cityVerts = {};                     // 城市所在网格顶点：边缘带重罚时豁免端点（城市本身）
     for (var ci = 0; ci < cities.length; ci++) cityVerts[cities[ci]] = true;
-    function addEdge(pi, xi) {              // 接收 mesh 顶点索引对，按陆/海分组去重
-        var key = (pi < xi ? pi + '|' + xi : xi + '|' + pi);
-        if (h[pi] <= 0 || h[xi] <= 0) {     // 任一端在海里 → 海上路段
-            if (seenSea[key]) return; seenSea[key] = true;
-            seaRoads.push([mesh.vxs[pi], mesh.vxs[xi]]);
-        } else {
-            if (seenLand[key]) return; seenLand[key] = true;
-            landRoads.push([mesh.vxs[pi], mesh.vxs[xi]]);
-        }
-    }
     /* 单源 Dijkstra（过海重罚：陆地优先、孤岛可渡海），复用公共 roadTrace（与手动新增城市逻辑一致）*/
     function trace(src, target) {
         return roadTrace(mesh, h, src, target, cityVerts);
@@ -636,9 +668,8 @@ function getRoads(render) {
     /* 阶段 A：短路径优先 MST（瓶颈限制）——每次接入欧氏距离最近的未接入城市（相邻优先），
        超长连接（> LIMIT）延迟到最后才允许：满足全连通的前提下禁止超长路线
        LIMIT 动态自适应：城市对欧氏距离 60 分位 × 1.3（随种子城市分布变化）*/
-    function euclid(a, b) { var dx = a[0] - b[0], dy = a[1] - b[1]; return Math.sqrt(dx * dx + dy * dy); }
     var pairDists = [];
-    for (var i = 0; i < n; i++) for (var j = i + 1; j < n; j++) pairDists.push(euclid(mesh.vxs[cities[i]], mesh.vxs[cities[j]]));
+    for (var i = 0; i < n; i++) for (var j = i + 1; j < n; j++) pairDists.push(cityEuclid(mesh, cities[i], cities[j]));
     pairDists.sort(function (a, b) { return a - b; });
     var LIMIT = Math.min(pairDists[Math.floor(pairDists.length * 0.6)] * 1.3, 0.38 * mesh.extent.width);   // 超长阈值：动态自适应 + 随世界规模（分辨率档位）等比放大
     var inTreeCity = {}; inTreeCity[0] = true;      // cities 数组下标是否已接入
@@ -646,7 +677,7 @@ function getRoads(render) {
     var tried = {};                                 // 本次尝试过但超长的城市（延迟）
     function pathLen(segs) {
         var L = 0;
-        for (var i = 0; i < segs.length; i++) L += euclid(mesh.vxs[segs[i][0]], mesh.vxs[segs[i][1]]);
+        for (var i = 0; i < segs.length; i++) L += cityEuclid(mesh, segs[i][0], segs[i][1]);
         return L;
     }
     var guard = 0;
@@ -657,7 +688,7 @@ function getRoads(render) {
             var dMin = Infinity;
             for (var j = 0; j < n; j++) {
                 if (!inTreeCity[j]) continue;
-                var dd = euclid(mesh.vxs[cities[i]], mesh.vxs[cities[j]]);
+                var dd = cityEuclid(mesh, cities[i], cities[j]);
                 if (dd < dMin) dMin = dd;
             }
             if (dMin < bestD) { bestD = dMin; best = i; }
@@ -666,12 +697,12 @@ function getRoads(render) {
         var nearJ = -1, nearD = Infinity;           // 距 best 最近的已接入城市
         for (var j = 0; j < n; j++) {
             if (!inTreeCity[j]) continue;
-            var dd = euclid(mesh.vxs[cities[best]], mesh.vxs[cities[j]]);
+            var dd = cityEuclid(mesh, cities[best], cities[j]);
             if (dd < nearD) { nearD = dd; nearJ = j; }
         }
         var segs = trace(cities[nearJ], cities[best]);
         if (segs && pathLen(segs) <= LIMIT) {       // 短路径 → 接入
-            for (var k = segs.length - 1; k >= 0; k--) addEdge(segs[k][0], segs[k][1]);
+            for (var k = segs.length - 1; k >= 0; k--) col.add(segs[k][0], segs[k][1]);
             inTreeCity[best] = true;
             connected++;
         } else { tried[best] = true; }              // 超长或 trace 失败 → 延迟到最后
@@ -682,13 +713,13 @@ function getRoads(render) {
         var best2 = -1, bestd2 = Infinity;
         for (var j = 0; j < n; j++) {
             if (!inTreeCity[j]) continue;
-            var dd = euclid(mesh.vxs[cities[i]], mesh.vxs[cities[j]]);
+            var dd = cityEuclid(mesh, cities[i], cities[j]);
             if (dd < bestd2) { bestd2 = dd; best2 = j; }   // best2 存城市索引
         }
         if (best2 >= 0) {
             var segs = trace(cities[best2], cities[i]);    // 沿地形（可绕海绕山，非直线）
-            if (segs) { for (var k = segs.length - 1; k >= 0; k--) addEdge(segs[k][0], segs[k][1]); }
-            else { addEdge(cities[i], cities[best2]); }    // 真正不可达才直线（几乎不发生）
+            if (segs) { for (var k = segs.length - 1; k >= 0; k--) col.add(segs[k][0], segs[k][1]); }
+            else { col.add(cities[i], cities[best2]); }    // 真正不可达才直线（几乎不发生）
             inTreeCity[i] = true;
         }
     }
@@ -697,12 +728,9 @@ function getRoads(render) {
         var town = cities[i], cap = terr[town];
         if (cap === undefined || cap === town) continue;
         var segs = trace(cap, town);
-        if (segs) { for (var k = segs.length - 1; k >= 0; k--) addEdge(segs[k][0], segs[k][1]); }
+        if (segs) { for (var k = segs.length - 1; k >= 0; k--) col.add(segs[k][0], segs[k][1]); }
     }
-    return {
-        land: mergeSegments(landRoads).map(relaxPath),   // 陆地道路：实线
-        sea: mergeSegments(seaRoads).map(relaxPath)      // 海上道路：虚线
-    };
+    return col.done();
 }
 function getTerritories(render) {
     var h = render.h;
@@ -923,21 +951,9 @@ function visualizeCities(svg, render) {
 }
 
 function generateCoast(params) {
-    var mesh = generateGoodMesh(params.npts, params.extent);
-    var h = add(
-            slope(mesh, randomVector(4)),
-            cone(mesh, runif(-1, -1)),
-            mountains(mesh, 50)
-            );
-    for (var i = 0; i < 10; i++) {
-        h = relax(h);
-    }
-    h = peaky(h);
-    h = doErosion(h, runif(0, 0.1), 5);
-    h = setSeaLevel(h, runif(0.2, 0.6));
-    h = fillSinks(h);
-    h = cleanCoast(h, 3);
-    return h;
+    /* 复用分步生成的两个阶段（genCoastMesh + genCoastField），消除重复实现：
+       两者合计与原 generateCoast 的完整流程（网格 + 高度场）逐行一致 → 生成结果不变 */
+    return genCoastField(genCoastMesh(params));
 }
 
 function terrCenter(h, terr, city, landOnly) {
@@ -972,6 +988,25 @@ function zhOk(name) {
   zhUsed.push(name);
   return true;
 }
+/* 单个城市的地形分类（coast 临海 / wet 近河）：classifyTerrains 批量分类与
+   手动新增城市命名（cityTerrainAt）共用同一套判断逻辑 */
+function cityTerrClass(h, rivers, vx) {
+    var coast = false;
+    var nbs = neighbours(h.mesh, vx);
+    for (var j = 0; j < nbs.length; j++) if (h[nbs[j]] <= 0) { coast = true; break; }
+    var p = h.mesh.vxs[vx], wet = coast;               // 临海即水域；否则看近河
+    if (!wet) {
+        for (var i = 0; i < rivers.length; i++) {
+            var rp = rivers[i];
+            for (var k = 0; k < rp.length; k++) {
+                var dx = rp[k][0] - p[0], dy = rp[k][1] - p[1];
+                if (dx * dx + dy * dy < 0.0016) { wet = true; break; }   // 0.04 世界 ≈ 40px
+            }
+            if (wet) break;
+        }
+    }
+    return {coast: coast, wet: wet};
+}
 /* 地形分类（通用）：为所有城市/领地计算地形标签 */
 function classifyTerrains(render) {
   var h = render.h, terrArr = render.terr;
@@ -984,17 +1019,7 @@ function classifyTerrains(render) {
   }
   var cityTerr = [];
   for (var i = 0; i < cities.length; i++) {
-    var cvx = cities[i], coast = false;
-    var nbs = neighbours(h.mesh, cvx);
-    for (var j = 0; j < nbs.length; j++) if (h[nbs[j]] <= 0) { coast = true; break; }
-    var p = h.mesh.vxs[cvx], wet = coast;               // 临海即水域；否则看近河
-    if (!wet) {
-      for (var k = 0; k < riverPts.length; k++) {
-        var dx = riverPts[k][0] - p[0], dy = riverPts[k][1] - p[1];
-        if (dx * dx + dy * dy < 0.0016) { wet = true; break; }   // 0.04 世界 ≈ 40px
-      }
-    }
-    cityTerr.push({coast: coast, wet: wet});
+    cityTerr.push(cityTerrClass(h, render.rivers, cities[i]));   // 复用公共分类（与手动新增城市一致）
   }
   var regionTerr = [];
   for (var i = 0; i < nterrs; i++) {
@@ -1015,24 +1040,9 @@ function classifyTerrains(render) {
   }
   return {cities: cityTerr, regions: regionTerr};
 }
-/* 单个城市的地形分类（coast/wet），供手动新增城市命名使用（与 classifyTerrains 的城市判断一致）*/
+/* 单个城市的地形分类（coast/wet），供手动新增城市命名使用（与 classifyTerrains 复用同一公共判断）*/
 function cityTerrainAt(render, vx) {
-    var h = render.h;
-    var coast = false;
-    var nbs = neighbours(h.mesh, vx);
-    for (var j = 0; j < nbs.length; j++) if (h[nbs[j]] <= 0) { coast = true; break; }
-    var p = h.mesh.vxs[vx], wet = coast;
-    if (!wet) {
-        for (var i = 0; i < render.rivers.length; i++) {
-            var rp = render.rivers[i];
-            for (var k = 0; k < rp.length; k++) {
-                var dx = rp[k][0] - p[0], dy = rp[k][1] - p[1];
-                if (dx * dx + dy * dy < 0.0016) { wet = true; break; }
-            }
-            if (wet) break;
-        }
-    }
-    return {coast: coast, wet: wet};
+    return cityTerrClass(render.h, render.rivers, vx);
 }
 /* 通用中文名生成器：lex=词库对象（提供部件池），terr=地形标签 */
 function makeNameZh(key, lex, terr) {
