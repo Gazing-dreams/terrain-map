@@ -32,8 +32,6 @@
 └── 版本存档/               # 历史版本存档：各版本单文件版 HTML + 源码压缩包（.rar）
 ```
 
-> **发布产物**：每次推送前运行 `.workbuddy/tools/build-release.js`，自动生成最新版单文件 HTML（内联 css/js/词库，双击即用）与源码压缩包（仅含网页运行必需的 index.html / css / js / lexicons），产物放入「版本存档」文件夹。
-
 ## 🛠 本地运行
 
 直接用浏览器打开 `index.html` 即可（`file://` 协议下词库动态加载不受 CORS 限制），无需构建。
