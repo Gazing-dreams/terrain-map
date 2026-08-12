@@ -338,9 +338,7 @@ function renderSideTree() {
                   '<button class="sp-edit no" onclick="event.stopPropagation();editCancel()" title="取消">✕</button>'
                 : esc(cityNameOf(ci)) +
                   '<button class="sp-edit" onclick="event.stopPropagation();startEdit(\'city\',' + ci + ')" title="改名">改</button>' +
-                  (ci >= nterrs
-                    ? '<button class="sp-edit del" onclick="event.stopPropagation();deleteCity(' + ci + ')" title="删除城市">删</button>'
-                    : '<button class="sp-edit del" onclick="event.stopPropagation();deleteCity(' + ci + ')" title="领地首都不可删除">删</button>')) +
+                  '<button class="sp-edit del" onclick="event.stopPropagation();deleteCity(' + ci + ')" title="' + (ci >= nterrs ? '删除城市' : '领地首都不可删除') + '">删</button>') +
               '</div>';
     }
     html += '</div>';

@@ -661,7 +661,6 @@ function getRoads(render) {
     var cities = render.cities, terr = render.terr;
     var nterrs = Math.min(render.params.nterrs, cities.length);
     var n = cities.length;
-    if (n < 2) { render.__roadSeen = { land: {}, sea: {} }; return {land: [], sea: []}; }
     render.__roadSeen = { land: {}, sea: {} };      // 全量重算 → 重置共享去重边集（删城重连/重新生成场景）
     var col = makeRoadCollector(render);            // 公共：陆/海分组 + 去重 + mergeSegments/relaxPath
     var attract = render.__roadSeen;                // 路网吸引：col.add() 已把边同步写入该边集，下一条路沿已生成道路走廊汇入（机制与 addCityToRender 相同，权重 0.5 见 trace）
@@ -688,26 +687,24 @@ function getRoads(render) {
         for (var i = 0; i < segs.length; i++) L += cityEuclid(mesh, segs[i][0], segs[i][1]);
         return L;
     }
-    function nearestInTree(i) {                     // 距 cities[i] 欧氏距离最近的已接入城市下标（阶段 A / 兜底共用）
+    function nearestInTree(i) {                     // 距 cities[i] 欧氏距离最近的已接入城市 {j: 下标, d: 距离}（阶段 A / 兜底共用）
         var bj = -1, bd = Infinity;
         for (var j = 0; j < n; j++) {
             if (!inTreeCity[j]) continue;
             var dd = cityEuclid(mesh, cities[i], cities[j]);
             if (dd < bd) { bd = dd; bj = j; }
         }
-        return bj;
+        return {j: bj, d: bd};
     }
     var guard = 0;
     while (connected < n && guard++ < n * 8) {
-        var best = -1, bestD = Infinity;            // 欧氏距离最近的未接入城市
+        var best = -1, bestD = Infinity, nearJ = -1;   // best=欧氏最近的未接入城市；nearJ=其最近已接入城市（同轮已算，直接缓存）
         for (var i = 0; i < n; i++) {
             if (inTreeCity[i] || tried[i]) continue;
-            var j2 = nearestInTree(i);
-            var dMin = j2 < 0 ? Infinity : cityEuclid(mesh, cities[i], cities[j2]);
-            if (dMin < bestD) { bestD = dMin; best = i; }
+            var nr = nearestInTree(i);
+            if (nr.d < bestD) { bestD = nr.d; best = i; nearJ = nr.j; }
         }
         if (best < 0) { tried = {}; continue; }     // 全部被延迟 → 解除限制（兜底长连接）
-        var nearJ = nearestInTree(best);            // 距 best 最近的已接入城市
         var segs = trace(cities[nearJ], cities[best]);
         if (segs && pathLen(segs) <= LIMIT) {       // 短路径 → 接入
             col.addTrace(segs);
@@ -718,7 +715,7 @@ function getRoads(render) {
     /* 兜底：仍无法接入 → 沿地形 trace 连最近已入树城市（超长允许但绝不直线；trace 真失败才直线，极罕见）*/
     for (var i = 0; i < n; i++) {
         if (inTreeCity[i]) continue;
-        var best2 = nearestInTree(i);               // 最近的已接入城市
+        var best2 = nearestInTree(i).j;             // 最近的已接入城市
         if (best2 >= 0) {
             var segs = trace(cities[best2], cities[i]);    // 沿地形（可绕海绕山，非直线）
             if (segs) col.addTrace(segs);
@@ -901,14 +898,17 @@ function makeD3Path(path) {
     return p.toString();
 }
 
+/* 通用 enter/exit 数据绑定（drawPaths / visualizeSlopes / visualizeCities / drawLabels 共用，
+   替代原先 5 处重复的 selectAll→enter/append/classed→exit/remove→selectAll 模板）*/
+function bindEnter(svg, selector, tag, data) {
+    var sel = svg.selectAll(selector).data(data);
+    sel.enter().append(tag).classed(selector.split('.')[1], true);
+    sel.exit().remove();
+    return svg.selectAll(selector);
+}
+
 function drawPaths(svg, cls, paths) {
-    var paths = svg.selectAll('path.' + cls).data(paths)
-    paths.enter()
-            .append('path')
-            .classed(cls, true)
-    paths.exit()
-            .remove();
-    svg.selectAll('path.' + cls)
+    bindEnter(svg, 'path.' + cls, 'path', paths)
         .attr('d', makeD3Path);
 }
 
@@ -949,13 +949,7 @@ function visualizeSlopes(svg, render) {
             strokes.push([[x-l, y+l*s], [x+l, y-l*s]]);
         }
     }
-    var lines = svg.selectAll('line.slope').data(strokes)
-    lines.enter()
-            .append('line')
-            .classed('slope', true);
-    lines.exit()
-            .remove();
-    svg.selectAll('line.slope')
+    bindEnter(svg, 'line.slope', 'line', strokes)
         .attr('x1', function (d) {return 1000*d[0][0]})
         .attr('y1', function (d) {return 1000*d[0][1]})
         .attr('x2', function (d) {return 1000*d[1][0]})
@@ -968,13 +962,7 @@ function visualizeCities(svg, render) {
     var h = render.h;
     var n = render.params.nterrs;
 
-    var circs = svg.selectAll('circle.city').data(cities);
-    circs.enter()
-            .append('circle')
-            .classed('city', true);
-    circs.exit()
-            .remove();
-    svg.selectAll('circle.city')
+    bindEnter(svg, 'circle.city', 'circle', cities)
         .attr('cx', function (d) {return 1000*h.mesh.vxs[d][0]})
         .attr('cy', function (d) {return 1000*h.mesh.vxs[d][1]})
         .attr('r', function (d, i) {return i >= n ? 4 : 10})
@@ -1223,13 +1211,7 @@ function drawLabels(svg, render) {
         label.size = size;
         citylabels.push(label);
     }
-    var texts = svg.selectAll('text.city').data(citylabels);
-    texts.enter()
-        .append('text')
-        .classed('city', true);
-    texts.exit()
-        .remove();
-    svg.selectAll('text.city')
+    bindEnter(svg, 'text.city', 'text', citylabels)
         .attr('x', function (d) {return 1000*d.x})
         .attr('y', function (d) {return 1000*d.y})
         .style('font-size', function (d) {return d.size})
@@ -1296,13 +1278,7 @@ function drawLabels(svg, render) {
             width:sx
         });
     }
-    texts = svg.selectAll('text.region').data(reglabels);
-    texts.enter()
-        .append('text')
-        .classed('region', true);
-    texts.exit()
-        .remove();
-    svg.selectAll('text.region')
+    bindEnter(svg, 'text.region', 'text', reglabels)
         .attr('x', function (d) {return 1000*d.x})
         .attr('y', function (d) {return 1000*d.y})
         .style('font-size', function (d) {return 1000*d.size})
