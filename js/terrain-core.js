@@ -532,22 +532,25 @@ function getRivers(h, limit) {
     return mergeSegments(links).map(relaxPath);
 }
 
-/* ============ 城市间道路：MST 主干 + 领地辐射（Prim-Dijkstra 混合）============
+/* ============ 城市间道路：MST 主干 + 领地辐射 + 叶节点支线（Prim-Dijkstra 混合）============
    阶段 A：短路径优先 MST —— 每次接入欧氏距离最近的未接入城市（相邻优先），
            超长连接（> LIMIT）延迟到最后才允许（满足全连通前提下禁止超长路线）
    阶段 B：补充 城镇→领地首都 直达（连接倾向次高；与 MST 重复的边自动去重）
+   阶段 C：叶节点城市（度=1）补第二连接 → 路网略微丰富（末端城市有支路）
    权重：上坡 x1.2 轻罚、过海 x15 重罚（弱化惩罚 → 路线更短更直，2.3）
    兜底：仍未接入的城市沿地形 trace 连最近已入树城市（真正不可达才直线）
+   路网吸引：全量生成同样启用（attract = render.__roadSeen，权重 0.5 弱于新增城市的 0.3）——
+             边生成边记录已生成道路，后续道路优先沿已有路网走廊再岔向目标，避免交叉/首都锐角分叉
    依赖现有：mesh/roadTrace/cityEuclid/makeRoadCollector/PriorityQueue
    =============================================================== */
-/* 公共寻路：沿网格从 src 到 target 的最短路径（含过海/上坡/避边权重）。
-   cityVerts 可空：传城市顶点集合时对边缘带（非城市）重罚，避免道路贴近地图边框。
-   返回索引对数组（靠 src 的在前）或 null。手动新增城市连路与 getRoads 共用此函数，逻辑一致。 */
-/* 单源 Dijkstra（过海重罚：陆地优先、孤岛可渡海），src → target 的路径边（索引对，靠 src 的在前）。
-   attract（可选）：已有道路边集 {land:{key:true}, sea:{key:true}} —— 命中该集的网格边权重 ×0.3，
+/* 公共寻路：单源 Dijkstra（过海重罚：陆地优先、孤岛可渡海），src → target 的路径边（索引对，靠 src 的在前），
+   返回 null 表示不可达。getRoads 全量生成与 addCityToRender 增量连路共用。
+   cityVerts 可空：传城市顶点集合时对边缘带（非城市）重罚（×8），避免道路贴近地图边框。
+   attract（可选）：已有道路边集 {land:{key:true}, sea:{key:true}} —— 命中该集的网格边权重 ×attractW，
    引导路径优先沿已有路网走（新道路先并入旧路走廊、接近目标才离开，避免首都处锐角分叉与穿插交叉）。
-   getRoads 全量生成时不传（null）→ 行为与原版一致；addCityToRender 增量连路时传入 render.__roadSeen */
-function roadTrace(mesh, h, src, target, cityVerts, attract) {
+   attractW（可选，默认 0.3）：吸引强度。getRoads 全量生成传 0.5（适度减弱 → 道路更独立、路网更丰富），
+   addCityToRender 增量连路不传（0.3，保持汇入式自然连接）*/
+function roadTrace(mesh, h, src, target, cityVerts, attract, attractW) {
     var dist = [], prev = [];
     var pq = new PriorityQueue({comparator: function (a, b) {return a.d - b.d;}});
     dist[src] = 0;
@@ -567,7 +570,7 @@ function roadTrace(mesh, h, src, target, cityVerts, attract) {
             if (cityVerts && isnearedge(mesh, v) && !cityVerts[v]) w *= 8;   // 边缘带（非城市顶点）重罚：避免贴近地图边框
             if (attract) {                          // 路网吸引：已有道路边低权重 → 沿旧路走
                 var k2 = (u < v ? u + '|' + v : v + '|' + u);
-                if (attract.land[k2] || attract.sea[k2]) w *= 0.3;
+                if (attract.land[k2] || attract.sea[k2]) w *= (attractW === undefined ? 0.3 : attractW);
             }
             var nd = dist[u] + w;
             if (dist[v] === undefined || nd < dist[v]) { dist[v] = nd; prev[v] = u; pq.queue({v: v, d: nd}); }
@@ -608,6 +611,10 @@ function makeRoadCollector(render) {
                 land.push([h.mesh.vxs[a], h.mesh.vxs[b]]);
             }
         },
+        addTrace: function (segs) {                 // 批量接收 roadTrace 返回的索引对（靠 src 在前 → 倒序加入）
+            if (!segs) return;                      // getRoads / addCityToRender 共用的收边循环（原 7 处重复内联）
+            for (var k = segs.length - 1; k >= 0; k--) this.add(segs[k][0], segs[k][1]);
+        },
         done: function () {
             return { land: mergeSegments(land).map(relaxPath), sea: mergeSegments(sea).map(relaxPath) };
         }
@@ -638,15 +645,11 @@ function addCityToRender(render, vx) {
             var d = cityEuclid(mesh, render.cities[i], vx);
             if (d < bestD) { bestD = d; nearJ = i; }
         }
-        if (nearJ >= 0) {
-            var segsA = roadTrace(mesh, h, render.cities[nearJ], vx, cityVerts, attract);
-            if (segsA) for (var k = segsA.length - 1; k >= 0; k--) col.add(segsA[k][0], segsA[k][1]);
-        }
+        if (nearJ >= 0) col.addTrace(roadTrace(mesh, h, render.cities[nearJ], vx, cityVerts, attract));
     }
     /* 阶段 B：补充 领地首都 直达（首都不是阶段 A 目标时）*/
     if (cap !== vx && cap !== (nearJ >= 0 ? render.cities[nearJ] : -1)) {
-        var segsB = roadTrace(mesh, h, cap, vx, cityVerts, attract);
-        if (segsB) for (var k = segsB.length - 1; k >= 0; k--) col.add(segsB[k][0], segsB[k][1]);
+        col.addTrace(roadTrace(mesh, h, cap, vx, cityVerts, attract));
     }
     var out = col.done();
     for (var li = 0; li < out.land.length; li++) render.landRoads.push(out.land[li]);
@@ -661,11 +664,14 @@ function getRoads(render) {
     if (n < 2) { render.__roadSeen = { land: {}, sea: {} }; return {land: [], sea: []}; }
     render.__roadSeen = { land: {}, sea: {} };      // 全量重算 → 重置共享去重边集（删城重连/重新生成场景）
     var col = makeRoadCollector(render);            // 公共：陆/海分组 + 去重 + mergeSegments/relaxPath
+    var attract = render.__roadSeen;                // 路网吸引：col.add() 已把边同步写入该边集，下一条路沿已生成道路走廊汇入（机制与 addCityToRender 相同，权重 0.5 见 trace）
     var cityVerts = {};                     // 城市所在网格顶点：边缘带重罚时豁免端点（城市本身）
     for (var ci = 0; ci < cities.length; ci++) cityVerts[cities[ci]] = true;
-    /* 单源 Dijkstra（过海重罚：陆地优先、孤岛可渡海），复用公共 roadTrace（与手动新增城市逻辑一致）*/
+    /* 单源 Dijkstra（过海重罚：陆地优先、孤岛可渡海），复用公共 roadTrace（与手动新增城市逻辑一致）：
+       传入 attract（render.__roadSeen）→ 边生成边吸引，后续道路优先并入已有路网走廊再岔向目标；
+       吸引权重 0.5（弱于手动新增的 0.3）→ 道路更独立、全量路网更丰富 */
     function trace(src, target) {
-        return roadTrace(mesh, h, src, target, cityVerts);
+        return roadTrace(mesh, h, src, target, cityVerts, attract, 0.5);
     }
     /* 阶段 A：短路径优先 MST（瓶颈限制）——每次接入欧氏距离最近的未接入城市（相邻优先），
        超长连接（> LIMIT）延迟到最后才允许：满足全连通的前提下禁止超长路线
@@ -682,29 +688,29 @@ function getRoads(render) {
         for (var i = 0; i < segs.length; i++) L += cityEuclid(mesh, segs[i][0], segs[i][1]);
         return L;
     }
+    function nearestInTree(i) {                     // 距 cities[i] 欧氏距离最近的已接入城市下标（阶段 A / 兜底共用）
+        var bj = -1, bd = Infinity;
+        for (var j = 0; j < n; j++) {
+            if (!inTreeCity[j]) continue;
+            var dd = cityEuclid(mesh, cities[i], cities[j]);
+            if (dd < bd) { bd = dd; bj = j; }
+        }
+        return bj;
+    }
     var guard = 0;
     while (connected < n && guard++ < n * 8) {
         var best = -1, bestD = Infinity;            // 欧氏距离最近的未接入城市
         for (var i = 0; i < n; i++) {
             if (inTreeCity[i] || tried[i]) continue;
-            var dMin = Infinity;
-            for (var j = 0; j < n; j++) {
-                if (!inTreeCity[j]) continue;
-                var dd = cityEuclid(mesh, cities[i], cities[j]);
-                if (dd < dMin) dMin = dd;
-            }
+            var j2 = nearestInTree(i);
+            var dMin = j2 < 0 ? Infinity : cityEuclid(mesh, cities[i], cities[j2]);
             if (dMin < bestD) { bestD = dMin; best = i; }
         }
         if (best < 0) { tried = {}; continue; }     // 全部被延迟 → 解除限制（兜底长连接）
-        var nearJ = -1, nearD = Infinity;           // 距 best 最近的已接入城市
-        for (var j = 0; j < n; j++) {
-            if (!inTreeCity[j]) continue;
-            var dd = cityEuclid(mesh, cities[best], cities[j]);
-            if (dd < nearD) { nearD = dd; nearJ = j; }
-        }
+        var nearJ = nearestInTree(best);            // 距 best 最近的已接入城市
         var segs = trace(cities[nearJ], cities[best]);
         if (segs && pathLen(segs) <= LIMIT) {       // 短路径 → 接入
-            for (var k = segs.length - 1; k >= 0; k--) col.add(segs[k][0], segs[k][1]);
+            col.addTrace(segs);
             inTreeCity[best] = true;
             connected++;
         } else { tried[best] = true; }              // 超长或 trace 失败 → 延迟到最后
@@ -712,16 +718,11 @@ function getRoads(render) {
     /* 兜底：仍无法接入 → 沿地形 trace 连最近已入树城市（超长允许但绝不直线；trace 真失败才直线，极罕见）*/
     for (var i = 0; i < n; i++) {
         if (inTreeCity[i]) continue;
-        var best2 = -1, bestd2 = Infinity;
-        for (var j = 0; j < n; j++) {
-            if (!inTreeCity[j]) continue;
-            var dd = cityEuclid(mesh, cities[i], cities[j]);
-            if (dd < bestd2) { bestd2 = dd; best2 = j; }   // best2 存城市索引
-        }
+        var best2 = nearestInTree(i);               // 最近的已接入城市
         if (best2 >= 0) {
             var segs = trace(cities[best2], cities[i]);    // 沿地形（可绕海绕山，非直线）
-            if (segs) { for (var k = segs.length - 1; k >= 0; k--) col.add(segs[k][0], segs[k][1]); }
-            else { col.add(cities[i], cities[best2]); }    // 真正不可达才直线（几乎不发生）
+            if (segs) col.addTrace(segs);
+            else col.add(cities[i], cities[best2]);        // 真正不可达才直线（几乎不发生）
             inTreeCity[i] = true;
         }
     }
@@ -729,8 +730,40 @@ function getRoads(render) {
     for (var i = nterrs; i < n; i++) {
         var town = cities[i], cap = terr[town];
         if (cap === undefined || cap === town) continue;
-        var segs = trace(cap, town);
-        if (segs) { for (var k = segs.length - 1; k >= 0; k--) col.add(segs[k][0], segs[k][1]); }
+        col.addTrace(trace(cap, town));
+    }
+    /* 阶段 C：给"叶节点城市"补第二连接（略微丰富路网）——
+       当前路网度=1 的末端城市，再沿地形 trace 连一条到欧氏最近的其他城市（< LIMIT 才连，带路网吸引）。
+       效果：末端城市从"尽头"变"有支路"，路网略密；col 去重保证与已有边不重叠 */
+    function cityDeg(vx) {                          // 当前路网中某城市的度数（作为网格边端点的出现次数）
+        var d = 0;
+        function cnt(set) {
+            for (var key in set) {
+                var p = key.indexOf('|');
+                var u = +key.slice(0, p), v = +key.slice(p + 1);
+                if (u === vx || v === vx) d++;
+            }
+        }
+        cnt(render.__roadSeen.land);
+        cnt(render.__roadSeen.sea);
+        return d;
+    }
+    for (var i = 0; i < n; i++) {
+        var c = cities[i];
+        if (cityDeg(c) !== 1) continue;             // 只补叶节点（度=1），主干道城市不动
+        var order = [];
+        for (var j = 0; j < n; j++) {
+            if (j === i) continue;
+            order.push([j, cityEuclid(mesh, c, cities[j])]);
+        }
+        order.sort(function (a, b) { return a[1] - b[1]; });   // 按欧氏距离从近到远
+        for (var k = 0; k < order.length; k++) {
+            var segs = trace(c, cities[order[k][0]]);
+            if (segs && pathLen(segs) <= LIMIT) {   // 可达且不过长 → 补上，只补一条
+                col.addTrace(segs);
+                break;
+            }
+        }
     }
     return col.done();
 }
@@ -950,12 +983,6 @@ function visualizeCities(svg, render) {
         .style('stroke-linecap', 'round')
         .style('stroke', 'black')
         .raise();
-}
-
-function generateCoast(params) {
-    /* 复用分步生成的两个阶段（genCoastMesh + genCoastField），消除重复实现：
-       两者合计与原 generateCoast 的完整流程（网格 + 高度场）逐行一致 → 生成结果不变 */
-    return genCoastField(genCoastMesh(params));
 }
 
 function terrCenter(h, terr, city, landOnly) {
@@ -1286,11 +1313,11 @@ function drawLabels(svg, render) {
 
 }
 /* ---- 分步生成（UI 体验优化）：把地图生成切成多个阶段，阶段间让出主线程并更新进度提示，
-       避免生成期间页面完全冻结；各阶段计算内容与顺序与原同步生成完全一致 → 结果不变 ---- */
-function genCoastMesh(params) {   // 分步 generateCoast 第 1 段：Voronoi 网格
+       避免生成期间页面完全冻结；各阶段计算内容与顺序与单次生成完全一致 → 结果不变 ---- */
+function genCoastMesh(params) {   // 第 1 段：Voronoi 网格
     return generateGoodMesh(params.npts, params.extent);
 }
-function genCoastField(mesh) {    // 第 2 段：高度场（Math.random 消费顺序与原 generateCoast 一致）
+function genCoastField(mesh) {    // 第 2 段：高度场（侵蚀/海平面/海岸清洗等全部地形流程）
     var h = add(slope(mesh, randomVector(4)), cone(mesh, runif(-1, -1)), mountains(mesh, 50));
     for (var i = 0; i < 10; i++) h = relax(h);
     h = peaky(h);
@@ -1356,7 +1383,6 @@ function doMapStepped(svg, params, step, done) {
 
 var defaultParams = {
     extent: defaultExtent,
-    generator: generateCoast,
     npts: 16384,
     ncities: 15,
     nterrs: 5,
