@@ -38,7 +38,6 @@ function svgPath() {
   return {
     moveTo: function (x, y) { cmds.push('M' + x + ',' + y); },
     lineTo: function (x, y) { cmds.push('L' + x + ',' + y); },
-    closePath: function () { cmds.push('Z'); },
     toString: function () { return cmds.join(''); }
   };
 }

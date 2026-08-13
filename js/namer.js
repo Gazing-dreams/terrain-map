@@ -196,7 +196,6 @@ function makeBasicLanguage() {
         vortho: {},
         noortho: true,
         nomorph: true,
-        nowordpool: true,
         minsyll: 1,
         maxsyll: 1,
         morphemes: {},
@@ -212,7 +211,6 @@ function makeRandomLanguage() {
     var lang = makeBasicLanguage();
     lang.noortho = false;
     lang.nomorph = false;
-    lang.nowordpool = false;
     lang.phonemes.C = shuffled(choose(consets, 2).C);
     lang.phonemes.V = shuffled(choose(vowsets, 2).V);
     lang.phonemes.L = shuffled(choose(lsets, 2).L);

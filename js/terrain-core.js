@@ -397,46 +397,27 @@ function setSeaLevel(h, q) {
 }
 
 function cleanCoast(h, iters) {
-    for (var iter = 0; iter < iters; iter++) {
-        var changed = 0;
+    /* 单方向海岸清洗：cellIsLand=true 处理陆地（清除单侧邻水的陆地尖端），false 处理水域（清除单侧邻陆的水域尖端）*/
+    function sweep(cellIsLand) {
         var newh = zero(h.mesh);
         for (var i = 0; i < h.length; i++) {
             newh[i] = h[i];
             var nbs = neighbours(h.mesh, i);
-            if (h[i] <= 0 || nbs.length != 3) continue;
+            if ((cellIsLand ? h[i] <= 0 : h[i] > 0) || nbs.length != 3) continue;
             var count = 0;
-            var best = -999999;
+            var best = cellIsLand ? -999999 : 999999;
             for (var j = 0; j < nbs.length; j++) {
-                if (h[nbs[j]] > 0) {
-                    count++;
-                } else if (h[nbs[j]] > best) {
-                    best = h[nbs[j]];    
-                }
+                if (cellIsLand ? h[nbs[j]] > 0 : h[nbs[j]] <= 0) count++;
+                else if (cellIsLand ? h[nbs[j]] > best : h[nbs[j]] < best) best = h[nbs[j]];
             }
             if (count > 1) continue;
             newh[i] = best / 2;
-            changed++;
         }
-        h = newh;
-        newh = zero(h.mesh);
-        for (var i = 0; i < h.length; i++) {
-            newh[i] = h[i];
-            var nbs = neighbours(h.mesh, i);
-            if (h[i] > 0 || nbs.length != 3) continue;
-            var count = 0;
-            var best = 999999;
-            for (var j = 0; j < nbs.length; j++) {
-                if (h[nbs[j]] <= 0) {
-                    count++;
-                } else if (h[nbs[j]] < best) {
-                    best = h[nbs[j]];
-                }
-            }
-            if (count > 1) continue;
-            newh[i] = best / 2;
-            changed++;
-        }
-        h = newh;
+        return newh;
+    }
+    for (var iter = 0; iter < iters; iter++) {
+        h = sweep(true);   // 陆地：清除单侧邻水的陆地尖端
+        h = sweep(false);  // 水域：清除单侧邻陆的水域尖端
     }
     return h;
 }
@@ -532,18 +513,17 @@ function getRivers(h, limit) {
     return mergeSegments(links).map(relaxPath);
 }
 
-/* ============ 城市间道路：MST 主干 + 领地辐射 + 叶节点支线（Prim-Dijkstra 混合）============
+/* ============ 城市间道路：MST 主干 + 领地辐射 + 叶节点支线（A* 寻路 + MST 选择）============
    阶段 A：短路径优先 MST —— 每次接入欧氏距离最近的未接入城市（相邻优先），
-           超长连接（> LIMIT）延迟到最后才允许（满足全连通前提下禁止超长路线）
+           超长连接（> LIMIT）延迟，最终由兜底允许超长接入（满足全连通前提下优先避免超长路线）
    阶段 B：补充 城镇→领地首都 直达（连接倾向次高；与 MST 重复的边自动去重）
-   阶段 C：叶节点城市（度=1）补第二连接 → 路网略微丰富（末端城市有支路）
-   权重：上坡 x1.2 轻罚、过海 x15 重罚（弱化惩罚 → 路线更短更直，2.3）
+   阶段 C：叶节点城市（度=1）补第二连接 → 路网略微丰富（末端城市有支路），最多试最近 3 个近邻
+   权重：上坡 x1.2 轻罚、过海 x15 重罚、边缘带（非城市）x8 重罚
    兜底：仍未接入的城市沿地形 trace 连最近已入树城市（真正不可达才直线）
-   路网吸引：全量生成同样启用（attract = render.__roadSeen，权重 0.5 弱于新增城市的 0.3）——
-             边生成边记录已生成道路，后续道路优先沿已有路网走廊再岔向目标，避免交叉/首都锐角分叉
+   路网吸引：attract = render.__roadSeen，权重 0.5（弱于新增城市的 0.3，机制详见 roadTrace）
    依赖现有：mesh/roadTrace/cityEuclid/makeRoadCollector/PriorityQueue
    =============================================================== */
-/* 公共寻路：单源 Dijkstra（过海重罚：陆地优先、孤岛可渡海），src → target 的路径边（索引对，靠 src 的在前），
+/* 公共寻路：A*（欧氏启发式，过海重罚：陆地优先、孤岛可渡海），src → target 的路径边（索引对，靠 src 的在前），
    返回 null 表示不可达。getRoads 全量生成与 addCityToRender 增量连路共用。
    cityVerts 可空：传城市顶点集合时对边缘带（非城市）重罚（×8），避免道路贴近地图边框。
    attract（可选）：已有道路边集 {land:{key:true}, sea:{key:true}} —— 命中该集的网格边权重 ×attractW，
@@ -552,13 +532,20 @@ function getRivers(h, limit) {
    addCityToRender 增量连路不传（0.3，保持汇入式自然连接）*/
 function roadTrace(mesh, h, src, target, cityVerts, attract, attractW) {
     var dist = [], prev = [];
-    var pq = new PriorityQueue({comparator: function (a, b) {return a.d - b.d;}});
+    /* A*：f = g + 欧氏启发式（到目标）。网格边权通常 ≥ 欧氏距离，启发式接近可采纳；
+       吸引/惩罚权重（0.3×/15×/8×）会让启发式非一致 → 可能找到次优路径，但加速显著且路径依然合理 */
+    var pq = new PriorityQueue({comparator: function (a, b) {return a.f - b.f;}});
+    var tx = mesh.vxs[target][0], ty = mesh.vxs[target][1];
+    function heu(v) {
+        var dx = mesh.vxs[v][0] - tx, dy = mesh.vxs[v][1] - ty;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
     dist[src] = 0;
-    pq.queue({v: src, d: 0});
+    pq.queue({v: src, d: 0, f: heu(src)});
     while (pq.length) {
         var item = pq.dequeue();
         var u = item.v;
-        if (dist[u] !== item.d) continue;
+        if (dist[u] !== item.d) continue;   // 过期项：已有更短的 g
         if (u === target) break;
         var nbs = mesh.adj[u];          // 邻接表（只读）
         var ds = mesh.dist[u];          // 距离缓存
@@ -573,7 +560,7 @@ function roadTrace(mesh, h, src, target, cityVerts, attract, attractW) {
                 if (attract.land[k2] || attract.sea[k2]) w *= (attractW === undefined ? 0.3 : attractW);
             }
             var nd = dist[u] + w;
-            if (dist[v] === undefined || nd < dist[v]) { dist[v] = nd; prev[v] = u; pq.queue({v: v, d: nd}); }
+            if (dist[v] === undefined || nd < dist[v]) { dist[v] = nd; prev[v] = u; pq.queue({v: v, d: nd, f: nd + heu(v)}); }
         }
     }
     var segs = [], x = target;
@@ -666,9 +653,7 @@ function getRoads(render) {
     var attract = render.__roadSeen;                // 路网吸引：col.add() 已把边同步写入该边集，下一条路沿已生成道路走廊汇入（机制与 addCityToRender 相同，权重 0.5 见 trace）
     var cityVerts = {};                     // 城市所在网格顶点：边缘带重罚时豁免端点（城市本身）
     for (var ci = 0; ci < cities.length; ci++) cityVerts[cities[ci]] = true;
-    /* 单源 Dijkstra（过海重罚：陆地优先、孤岛可渡海），复用公共 roadTrace（与手动新增城市逻辑一致）：
-       传入 attract（render.__roadSeen）→ 边生成边吸引，后续道路优先并入已有路网走廊再岔向目标；
-       吸引权重 0.5（弱于手动新增的 0.3）→ 道路更独立、全量路网更丰富 */
+    /* 寻路：复用公共 roadTrace，吸引权重传 0.5（机制见 roadTrace）*/
     function trace(src, target) {
         return roadTrace(mesh, h, src, target, cityVerts, attract, 0.5);
     }
@@ -704,7 +689,7 @@ function getRoads(render) {
             var nr = nearestInTree(i);
             if (nr.d < bestD) { bestD = nr.d; best = i; nearJ = nr.j; }
         }
-        if (best < 0) { tried = {}; continue; }     // 全部被延迟 → 解除限制（兜底长连接）
+        if (best < 0) break;    // 全部被延迟（超长）→ 交给下方兜底；欧氏距离不随 MST 变化，清空重试只会反复 trace 同一超长对
         var segs = trace(cities[nearJ], cities[best]);
         if (segs && pathLen(segs) <= LIMIT) {       // 短路径 → 接入
             col.addTrace(segs);
@@ -754,7 +739,9 @@ function getRoads(render) {
             order.push([j, cityEuclid(mesh, c, cities[j])]);
         }
         order.sort(function (a, b) { return a[1] - b[1]; });   // 按欧氏距离从近到远
-        for (var k = 0; k < order.length; k++) {
+        /* 只尝试最近的前几个近邻（避免孤立叶节点对全部近邻反复 trace 超长失败）*/
+        var leafTries = Math.min(order.length, 3);
+        for (var k = 0; k < leafTries; k++) {
             var segs = trace(c, cities[order[k][0]]);
             if (segs && pathLen(segs) <= LIMIT) {   // 可达且不过长 → 补上，只补一条
                 col.addTrace(segs);
@@ -1110,7 +1097,7 @@ function drawLabels(svg, render) {
     lastLang = makeRandomLanguage();
     var lang = lastLang;
     zhUsed = []; // 每次生成重置中文名去重表
-    // 先生成全部英文名、再生成全部中文名：英文名随机流与原版完全一致，中文名独立且同种子可复现
+    // 先生成全部英文名、再生成全部中文名：随机流确定（同种子可复现），中文名独立
     var cityTextsEn = [], cityTextsZh = [], regionTextsEn = [], regionTextsZh = [];
     for (var i = 0; i < cities.length; i++) cityTextsEn.push(makeName(lang, 'city'));
     for (var i = 0; i < nterrs; i++) regionTextsEn.push(makeName(lang, 'region'));
@@ -1338,9 +1325,9 @@ function doMapStepped(svg, params, step, done) {
         return;
     }
     if (step === 4) {   // 道路
-        render.roads = getRoads(render);
-        render.landRoads = render.roads.land;
-        render.seaRoads = render.roads.sea;
+        var roads = getRoads(render);
+        render.landRoads = roads.land;
+        render.seaRoads = roads.sea;
         status.textContent = '生成中… ⑤ 绘制地图';
         setTimeout(function () { doMapStepped(svg, params, 5, done); }, 16);
         return;
